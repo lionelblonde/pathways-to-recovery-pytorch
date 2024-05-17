@@ -1,0 +1,1 @@
+python main.py train --cfg="tasks/gpu.yml" --env_id="Walker2d-v4" --seed=0 --num_demos=4 --expert_path="/home/lionel/Datasets/expert_demonstrations_openai_mujoco_h5/Walker2d-v4"

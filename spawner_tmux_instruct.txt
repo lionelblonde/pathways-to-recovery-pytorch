@@ -1,0 +1,2 @@
+export DEMO_DIR=/Users/lionelblonde/Datasets/mujoco-experts
+python spawner.py --cfg="tasks/cpu.yml" --conda_env="ptfarama" --env_bundle="debug" --deployment="tmux" --num_seeds=1 --num_demos=[1,4] --caliber="short" --nodeploy_now

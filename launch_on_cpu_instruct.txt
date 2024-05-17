@@ -1,0 +1,1 @@
+python main.py train --cfg="tasks/cpu.yml" --env_id="Walker2d-v4" --seed=0 --num_demos=4 --expert_path="/Users/lionelblonde/Datasets/mujoco-experts/Walker2d-v4"

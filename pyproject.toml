@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 99
+preview = true
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "N", "A", "B", "C4", "T20", "PTH", "ERA", "FLY", "NPY", "RUF",
+    "BLE", "FBT", "COM", "DTZ", "ISC", "ICN", "G", "PIE", "Q", "RSE", "RET", "SIM",
+    "TID", "TRY", "PERF", "FURB", "LOG", "TD",
+    "PL",
+    # "ANN001", "ANN401", "ANN201", "ANN202", "ANN204", "ANN205", "ANN206",
+]
+ignore = [
+    "PLR0904", "PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "PLR0916", "PLR0917",
+    "SIM102", "TRY003", "TD003",
+]
+preview = true
