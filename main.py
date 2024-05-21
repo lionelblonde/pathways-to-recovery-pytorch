@@ -126,7 +126,7 @@ class MagicRunner(object):
             logger.set_level(logger.DISABLED)  # turn the logging off
         else:
             log_path = Path(self._cfg.log_dir) / name
-            log_path.mkdir(exist_ok=True)
+            log_path.mkdir(parents=True, exist_ok=True)
             logger.configure(directory=log_path, format_strs=["stdout", "log", "json", "csv"])
             # config dump
             OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
