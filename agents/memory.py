@@ -1,9 +1,54 @@
-from typing import Optional, Callable
+from typing import Optional, Callable, NamedTuple
 
 from beartype import beartype
 from einops import repeat, pack, rearrange
 import numpy as np
 import torch
+from torch import nn
+from torch.nn import functional as ff
+
+
+class MemoryState(NamedTuple):
+    cnt: torch.Tensor
+    mem: torch.Tensor
+
+
+class EpisodicMemory(nn.Module):  # defined as a module for the signature to be similar to a LSTM
+    """Episodic Memory implementation"""
+
+    @beartype
+    def __init__(self, memory_size: int, capacity: int, device: torch.device):
+        # `memory_size`: size of the vectors to be stored
+        # `capacity`: max number of memories (verctors) to store
+        self.memory_size = memory_size
+        self.capacity = capacity
+        self.device = device
+
+    def forward(self, inputs: torch.Tensor, prev_state: MemoryState):
+        # explaination of the signature:
+        # `inputs`: the new input to be stored in memory
+        # `prev_state`: a tuple containing the previous counter and memories
+        assert inputs.device == self.device, "wrong device"
+        inputs = inputs.detach()  # stop gradient (note: everything else is differentiable)
+        counter, memories = prev_state
+
+        # compute the position to update in the memory using modulo operation
+        counter_mod = torch.fmod(counter, self.capacity)
+        # create a one-hot vector to select the memory slot to be updated
+        slot_selector = ff.one_hot(counter_mod, num_classes=self.capacity).unsqueeze(-1).float()
+        # update the memory slots
+        # only the selected slot is updated with the new input
+        memories = memories * (1 - slot_selector) + (slot_selector * inputs.unsqueeze(1))
+        # increment the counter to keep track of the memory slot to be updated next
+        counter = counter + 1
+
+        # return the updated memories and the current, updated version of `prev_state`
+        return (memories, MemoryState(counter, memories))  # parens for legibility
+
+    def initial_state(self, batch_size):
+        counter = torch.zeros((batch_size, 1), dtype=torch.long)
+        memories = torch.zeros((batch_size, self.capacity, self.memory_size))
+        return counter, memories
 
 
 class RingBuffer(object):
