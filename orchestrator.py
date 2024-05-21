@@ -22,6 +22,8 @@ from helpers.misc_util import log_iter_info, prettify_numb
 from helpers.opencv_util import record_video
 from agents.spp_agent import SPPAgent
 
+from agents.memory import Trajectory
+
 
 DEBUG = False
 
@@ -40,6 +42,9 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
     assert agent.replay_buffers is not None
 
     t = 0
+
+    ongoing_trajs = [[] for _ in range(
+        env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)) else 1)]
 
     ob, _ = env.reset(seed=seed)  # seed is a keyword argument, not positional
 
@@ -76,10 +81,24 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
             pp_func = postproc_tr
         outss = pp_func(tr_or_vtr, agent.ob_shape, agent.ac_shape, wrap_absorb=wrap_absorb)
         assert outss is not None
-        for i, outs in enumerate(outss):
-            for out in outs:
+        for i, outs in enumerate(outss):  # iterate over env (although maybe only one non-vec)
+            for j, out in enumerate(outs):  # iterate over transitions
                 # add transition to the i-th replay buffer
-                agent.replay_buffers[i].append(out, rew_func=agent.get_syn_rew)
+                pp_out = agent.replay_buffers[i].append(out, rew_func=agent.get_syn_rew)
+                # add transition to the currently ongoing trajectory in the i-th env
+                ongoing_trajs[i].append(pp_out)
+
+                agent.traject_stores[i].append(ongoing_trajs[i])  # TEST LINE, NOT CORRECT PLCMT
+                # TODO(lionel): this should properly add the trajectory to the store
+
+                raise ValueError
+
+                if bool(pp_out["dones1"]) and (j + 1) == len(outs):
+                    # second condition: if absorbing, there are two dones in a row -> stop at last
+                    # since end of the trajectory, add the trajectory to the i-th trajectory store
+                    agent.traject_stores[i].append(ongoing_trajs[i])
+                    # reset the ongoing_trajs to an empty one
+                    ongoing_trajs[i] = []
 
         # set current state with the next
         ob = deepcopy(new_ob)

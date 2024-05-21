@@ -1,4 +1,5 @@
 from typing import Optional, Callable
+from collections import deque
 
 from beartype import beartype
 from einops import repeat, pack, rearrange
@@ -10,11 +11,12 @@ class RingBuffer(object):
 
     @beartype
     def __init__(self, maxlen: int, shape: tuple[int, ...], device: torch.device):
-        """Ring buffer implementation"""
+        """Ring buffer impl"""
         self.maxlen = maxlen
+        self.device = device
         self.start = 0
         self.length = 0
-        self.data = torch.zeros((maxlen, *shape), dtype=torch.float32, device=device)
+        self.data = torch.zeros((maxlen, *shape), dtype=torch.float32, device=self.device)
 
     @beartype
     def __len__(self):
@@ -28,7 +30,7 @@ class RingBuffer(object):
 
     @beartype
     def get_batch(self, idxs: torch.Tensor) -> torch.Tensor:
-        # important: idxs is a numpy array, and start and maxlen are ints
+        # important: idxs is a tensor, and start and maxlen are ints
         return self.data[(self.start + idxs) % self.maxlen]
 
     @beartype
@@ -51,6 +53,77 @@ class RingBuffer(object):
         return (self.start + self.length - 1) % self.maxlen
 
 
+class TrajectoryStore(object):
+
+    @beartype
+    def __init__(self,
+                 generator: torch.Generator,
+                 capacity: int,
+                 seq_t_max: int,
+                 erb_shapes: dict[str, tuple[int, ...]],
+                 device: torch.device):
+        """Replay buffer impl"""
+        self.rng = generator
+        self.capacity = capacity
+        self.seq_t_max = seq_t_max
+        self.erb_shapes = erb_shapes
+        self.pdd_shapes = {k: (self.seq_t_max, *s) for k, s in self.erb_shapes.items()}
+        self.device = device
+        self.ring_buffers = {}
+        for k in self.erb_shapes:
+            self.ring_buffers.update({
+                k: RingBuffer(self.capacity, self.pdd_shapes[k], self.device)})
+
+    @beartype
+    def get_trns(self, idxs: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Collect a batch from indices"""
+        trjs = {}
+        for k, v in self.ring_buffers.items():
+            trjs[k] = v.get_batch(idxs)
+        return trjs
+
+    @beartype
+    def sample(self, batch_size: int) -> dict[str, torch.Tensor]:
+        """Sample transitions uniformly from the replay buffer"""
+        idxs = torch.randint(
+            low=0,
+            high=self.num_entries,
+            size=(batch_size,),
+            generator=self.rng,
+            device=self.device,
+        )
+        return self.get_trns(idxs)
+
+    @beartype
+    def append(self, trj: list[dict[str, torch.Tensor]]):
+        new_trj = self.rearrange_and_zeropad(trj)
+        for k in self.ring_buffers:
+            self.ring_buffers[k].append(v=new_trj)
+
+    @beartype
+    def rearrange_and_zeropad(self, trj: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        """Utility func that transforms a list of transitions (dictionaries)
+        into a dictionary of an aggreagated and zero-padded tensor.
+        """
+        tmp_trj = {k: [] for k in self.pdd_shapes}  # could use a defaultdict
+        pdd_trj = {}
+        for e in trj:
+            for k, v in e.items():
+                tmp_trj[k].append(v)
+        for k, v in tmp_trj.items():
+            if not isinstance(v, torch.Tensor):
+                raise TypeError(k)
+            tmp_trj_k = torch.cat(v).to(self.device)  # TODO(lionel): use einops here
+            pdd_trj[k] = torch.zeros(self.pdd_shapes[k], dtype=torch.float32, device=self.device)
+            pdd_trj[k][:tmp_trj_k.size(0), :] = tmp_trj_k
+        return pdd_trj
+
+    @beartype
+    @property
+    def num_entries(self) -> int:
+        return len(self.ring_buffers["obs0"])  # could pick any other key
+
+
 class ReplayBuffer(object):
 
     @beartype
@@ -59,6 +132,7 @@ class ReplayBuffer(object):
                  capacity: int,
                  erb_shapes: dict[str, tuple[int, ...]],
                  device: torch.device):
+        """Replay buffer impl"""
         self.rng = generator
         self.capacity = capacity
         self.erb_shapes = erb_shapes
@@ -178,15 +252,19 @@ class ReplayBuffer(object):
     @beartype
     def append(self, trn: dict[str, np.ndarray],
                *,
-               rew_func: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor]):
-        """Add a transition to the replay buffer"""
+               rew_func: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
+        ) -> dict[str, torch.Tensor]:
+        """Add a transition to the replay buffer.
+        Returns the latest transition (i.e. the one just added) for subsequent modules to use
+        since we transform into tensor and create the reward here already.
+        """
         assert {k for k in self.ring_buffers if k != "rews"} == set(trn.keys()), "key mismatch"
         for k in self.ring_buffers:
             if k == "rews":
                 continue
             if not isinstance(trn[k], np.ndarray):
                 raise TypeError(k)
-            new_tensor = torch.Tensor(trn[k]).to(self.device)
+            new_tensor = torch.Tensor(trn[k]).to(self.device)  # cap T tensor to force FloatTensor
             self.ring_buffers[k].append(v=new_tensor)
         # also add the synthetic reward to the replay buffer
         # note: by this point everything is already as a tensor on device
@@ -201,11 +279,12 @@ class ReplayBuffer(object):
         # sanity-check that all the ring buffers are at the same stage
         last_idxs = [li := v.latest_entry_idx for v in self.ring_buffers.values()]
         assert all(ll == li for ll in last_idxs), "not all equal"
+        return self.latest_entry  # returned for subsequent modules to use
 
     @beartype
-    def __repr__(self) -> str:
-        shapes = "|".join([f"[{k}:{s}]" for k, s in self.erb_shapes.items()])
-        return f"ReplayBuffer(capacity={self.capacity}, shapes={shapes})"
+    @property
+    def latest_entry(self) -> dict[str, torch.Tensor]:
+        return self.get_trns(torch.tensor(self.latest_entry_idx))
 
     @beartype
     @property
@@ -216,3 +295,8 @@ class ReplayBuffer(object):
     @property
     def num_entries(self) -> int:
         return len(self.ring_buffers["obs0"])  # could pick any other key
+
+    @beartype
+    def __repr__(self) -> str:
+        shapes = "|".join([f"[{k}:{s}]" for k, s in self.erb_shapes.items()])
+        return f"ReplayBuffer(capacity={self.capacity}, shapes={shapes})"
