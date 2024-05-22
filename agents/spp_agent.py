@@ -496,7 +496,11 @@ class SPPAgent(object):
         logger.info(f"logged this to wandb: {wandb_dict}")
 
     @beartype
-    def update_actr_crit(self, batch: dict[str, torch.Tensor], *, update_actr: bool):
+    def update_actr_crit(self,
+                         trns_batch: dict[str, torch.Tensor],
+                         trjs_batch: dict[str, torch.Tensor],
+                         *,
+                         update_actr: bool):
         """Update the critic and the actor"""
 
         with torch.no_grad():
