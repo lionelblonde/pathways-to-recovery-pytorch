@@ -8,16 +8,16 @@ from einops import repeat, rearrange, pack
 import wandb
 import numpy as np
 import torch
+from torch.optim import Adam
 from torch.nn.utils import clip_grad as cg
-
-import torch.nn.functional as ff
+from torch.nn import functional as ff
 from torch import autograd
 
 from helpers import logger
 from helpers.normalizer import RunningMoments
 from helpers.dataset import DemoDataset
 from helpers.math_util import huber_quant_reg_loss
-from agents.nets import log_module_info, Actor, TanhGaussActor, Critic, Discriminator
+from agents.nets import log_module_info, Actor, TanhGaussActor, Critic, Discriminator, Base
 from agents.ac_noise import NormalActionNoise
 from agents.memory import ReplayBuffer, TrajectStore
 
@@ -39,6 +39,7 @@ class SPPAgent(object):
                  traject_stores: Optional[list[TrajectStore]]):
 
         self.ob_shape, self.ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
+        # the self here needed because those shapes are used in the orchestrator
         self.max_ac = max_ac
 
         self.device = device
@@ -147,20 +148,23 @@ class SPPAgent(object):
             self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
-        # set up the optimizers
-        self.actr_opt = torch.optim.Adam(self.actr.parameters(), lr=self.hps.actor_lr)
-        self.crit_opt = torch.optim.Adam(
-            self.crit.parameters(),
-            lr=self.hps.critic_lr,
-            weight_decay=self.hps.wd_scale,
-        )
-        if self.hps.clipped_double:
-            self.twin_opt = torch.optim.Adam(
-                self.twin.parameters(),
-                lr=self.hps.critic_lr,
-                weight_decay=self.hps.wd_scale,
-            )
+        disc_net_args = [self.ob_shape, self.ac_shape, self.hps.d_hid_size, self.rms_obs]
+        disc_net_kwargs_keys = ["wrap_absorb", "d_batch_norm", "spectral_norm", "state_only"]
+        disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
+        self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
 
+        # set up the optimizers
+
+        self.actr_opt = Adam(self.actr.parameters(), lr=self.hps.actor_lr)
+        self.crit_opt = Adam(self.crit.parameters(), lr=self.hps.critic_lr,
+            weight_decay=self.hps.wd_scale)
+        if self.hps.clipped_double:
+            self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.critic_lr,
+                weight_decay=self.hps.wd_scale)
+
+        self.disc_opt = Adam(self.disc.parameters(), lr=self.hps.d_lr)
+
+        # setup log(alpha) if SAC is chosen
         self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
         # the previous line is here for the alpha property to always exist
         if not self.hps.prefer_td3_over_sac:
@@ -168,12 +172,9 @@ class SPPAgent(object):
             # common trick: learn log(alpha) instead of alpha directly
             self.log_alpha.requires_grad = True
             self.targ_ent = -self.ac_shape[-1]  # set target entropy to -|A|
-            self.loga_opt = torch.optim.Adam(
-                [self.log_alpha],
-                lr=self.hps.log_alpha_lr,
-            )
+            self.loga_opt = Adam([self.log_alpha], lr=self.hps.log_alpha_lr)
 
-        # set up lr scheduler
+        # set up lr scheduler for the policy
         self.actr_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.actr_opt,
             (t_max := ((self.MAGIC_FACTOR * self.hps.num_timesteps * self.hps.actor_update_delay) /
@@ -181,13 +182,24 @@ class SPPAgent(object):
         )
         logger.info(f"{t_max = }")
 
-        if self.expert_dataset is not None:
-            # create discriminator and its optimizer
-            disc_net_args = [self.ob_shape, self.ac_shape, self.hps.d_hid_size, self.rms_obs]
-            disc_net_kwargs_keys = ["wrap_absorb", "d_batch_norm", "spectral_norm", "state_only"]
-            disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
-            self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
-            self.disc_opt = torch.optim.Adam(self.disc.parameters(), lr=self.hps.d_lr)
+        # TODO(lionel): create every new net at opt here
+        # create the synthetic returns, bias, and gate nets
+        self.hps.xx_is_ob = True  # whether the "state" input are the env obs or rec hidden state
+        self.hps.rec_hid_shape = 100
+        assert isinstance(self.hps.rec_hid_shape, tuple)
+        base_net_args = [
+            self.ob_shape if self.hps.xx_is_ob else self.hps.rec_hid_shape,
+            self.ac_shape, (100, 100), self.rms_obs]
+        base_net_kwargs_keys = ["layer_norm", "xx_is_ob"]
+        base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
+        self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
+        self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
+        self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
+        # define their optimizers
+        # TODO(lionel): figure out what lr to use for those guys (hard-coded for now)
+        self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
+        self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
+        self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
 
         log_module_info(self.actr)
         log_module_info(self.crit)
