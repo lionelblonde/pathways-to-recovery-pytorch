@@ -233,52 +233,6 @@ class Discriminator(nn.Module):
         return self.d_head(x)  # no sigmoid here
 
 
-# TD3 (diffs: original uses no layer norm, no obs normalizer)
-
-class Actor(nn.Module):
-
-    @beartype
-    def __init__(self,
-                 ob_shape: tuple[int, ...],
-                 ac_shape: tuple[int, ...],
-                 hid_dims: tuple[int, int],
-                 rms_obs: RunningMoments,
-                 max_ac: float,
-                 *,
-                 layer_norm: bool):
-        super().__init__()
-        self.ob_dim = ob_shape[-1]  # needed in child class
-        self.ac_dim = ac_shape[-1]  # needed in child class
-        self.rms_obs = rms_obs
-        self.max_ac = max_ac
-        self.layer_norm = layer_norm
-
-        # assemble the last layers and output heads
-        self.fc_stack = nn.Sequential(OrderedDict([
-            ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(self.ob_dim, hid_dims[0])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.ReLU()),
-            ]))),
-            ("fc_block_2", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.ReLU()),
-            ]))),
-        ]))
-        self.head = nn.Linear(hid_dims[1], self.ac_dim)
-
-        # perform initialization
-        self.fc_stack.apply(init())
-        self.head.apply(init())
-
-    @beartype
-    def act(self, ob: torch.Tensor) -> torch.Tensor:
-        ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
-        x = self.fc_stack(ob)
-        return float(self.max_ac) * torch.tanh(self.head(x))
-
-
 class Critic(nn.Module):
 
     @beartype
@@ -340,6 +294,52 @@ class Critic(nn.Module):
             # return a categorical distribution
             x = ff.log_softmax(x, dim=1).exp()
         return x
+
+
+# TD3 (diffs: original uses no layer norm, no obs normalizer)
+
+class Actor(nn.Module):
+
+    @beartype
+    def __init__(self,
+                 ob_shape: tuple[int, ...],
+                 ac_shape: tuple[int, ...],
+                 hid_dims: tuple[int, int],
+                 rms_obs: RunningMoments,
+                 max_ac: float,
+                 *,
+                 layer_norm: bool):
+        super().__init__()
+        self.ob_dim = ob_shape[-1]  # needed in child class
+        self.ac_dim = ac_shape[-1]  # needed in child class
+        self.rms_obs = rms_obs
+        self.max_ac = max_ac
+        self.layer_norm = layer_norm
+
+        # assemble the last layers and output heads
+        self.fc_stack = nn.Sequential(OrderedDict([
+            ("fc_block_1", nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(self.ob_dim, hid_dims[0])),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
+                ("nl", nn.ReLU()),
+            ]))),
+            ("fc_block_2", nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
+                ("nl", nn.ReLU()),
+            ]))),
+        ]))
+        self.head = nn.Linear(hid_dims[1], self.ac_dim)
+
+        # perform initialization
+        self.fc_stack.apply(init())
+        self.head.apply(init())
+
+    @beartype
+    def act(self, ob: torch.Tensor) -> torch.Tensor:
+        ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
+        x = self.fc_stack(ob)
+        return float(self.max_ac) * torch.tanh(self.head(x))
 
 
 # SAC
@@ -406,3 +406,51 @@ class TanhGaussActor(Actor):
         ac_log_std = self.bound_log_std(ac_log_std)
         ac_std = ac_log_std.exp()
         return ac_mean, ac_std
+
+
+# Synthetic Returns
+
+class Base(nn.Module):
+
+    @beartype
+    def __init__(self,
+                 xx_shape: tuple[int, ...],  # either observation state or recurrent hidden state
+                 ac_shape: tuple[int, ...],
+                 hid_dims: tuple[int, int],
+                 rms_obs: RunningMoments,
+                 *,
+                 xx_is_ob: bool,
+                 layer_norm: bool):
+        super().__init__()
+        xx_dim = xx_shape[-1]
+        ac_dim = ac_shape[-1]
+        self.rms_obs = rms_obs
+        self.xx_is_ob = xx_is_ob
+        self.layer_norm = layer_norm
+
+        # assemble the last layers and output heads
+        self.fc_stack = nn.Sequential(OrderedDict([
+            ("fc_block_1", nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(xx_dim + ac_dim, hid_dims[0])),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
+                ("nl", nn.ReLU()),
+            ]))),
+            ("fc_block_2", nn.Sequential(OrderedDict([
+                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
+                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
+                ("nl", nn.ReLU()),
+            ]))),
+        ]))
+        self.head = nn.Linear(hid_dims[1], 1)
+
+        # perform initialization
+        self.fc_stack.apply(init())
+        self.head.apply(init())
+
+    @beartype
+    def forward(self, xx: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
+        if self.xx_is_ob:
+            xx = self.rms_obs.standardize(xx).clamp(*STANDARDIZED_OB_CLAMPS)
+        x, _ = pack([xx, ac], "b *")
+        x = self.fc_stack(x)
+        return self.head(x)
