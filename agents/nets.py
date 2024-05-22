@@ -420,12 +420,14 @@ class Base(nn.Module):
                  rms_obs: RunningMoments,
                  *,
                  xx_is_ob: bool,
-                 layer_norm: bool):
+                 layer_norm: bool,
+                 sigmoid_o: bool = False):
         super().__init__()
         xx_dim = xx_shape[-1]
         ac_dim = ac_shape[-1]
         self.rms_obs = rms_obs
         self.xx_is_ob = xx_is_ob
+        self.sigmoid_o = sigmoid_o
         self.layer_norm = layer_norm
 
         # assemble the last layers and output heads
@@ -453,4 +455,7 @@ class Base(nn.Module):
             xx = self.rms_obs.standardize(xx).clamp(*STANDARDIZED_OB_CLAMPS)
         x, _ = pack([xx, ac], "b *")
         x = self.fc_stack(x)
-        return self.head(x)
+        x = self.head(x)
+        if self.sigmoid_o:
+            x = ff.sigmoid(x)
+        return x
