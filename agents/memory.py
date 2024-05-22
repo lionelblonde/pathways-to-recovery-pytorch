@@ -113,9 +113,11 @@ class TrajectStore(object):
             for k, v in e.items():
                 if k not in self.FILTRD_KEYS:
                     continue
-                tmp_trj[k].append(v.unsqueeze(dim=0))  # TODO(lionel): use einops here
+                tmp_trj[k].append(rearrange(v, "d -> 1 d"))
         for k, v in tmp_trj.items():
-            tmp_trj_k = torch.cat(v, dim=0).to(self.device)  # TODO(lionel): use einops here
+            tmp_trj_k, _ = pack(v, "* d")
+            assert tmp_trj_k.device == self.device, "wrong device"
+            # this assertion implicly also asserts that v was a list of tensors, all on self.device
             pdd_trj[k] = torch.zeros(self.pdd_shapes[k], dtype=torch.float32, device=self.device)
             pdd_trj[k][:tmp_trj_k.size(0), :] = tmp_trj_k
         return pdd_trj
