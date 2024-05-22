@@ -214,23 +214,15 @@ class SPPAgent(object):
         return x
 
     @beartype
-    def sample_batch(self) -> dict[str, torch.Tensor]:
-        """Sample a batch of transitions from the replay buffer"""
+    def sample_trns_batch(self) -> dict[str, torch.Tensor]:
+        """Sample (a) batch(es) of transitions from the replay buffer(s)"""
         assert self.replay_buffers is not None
 
-        # create patcher if needed
-        @beartype
-        def _patcher(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
-            return self.get_syn_rew(x, y, z)
-
-        patcher = _patcher if self.hps.historical_patching else None
-
-        # get a batch of transitions from replay buffer
         batches = defaultdict(list)
         for rb in self.replay_buffers:
             batch = rb.sample(
                 self.hps.batch_size,
-                patcher=patcher,
+                patcher=self.get_syn_rew if self.hps.historical_patching else None,
                 n_step_returns=self.hps.n_step_returns,
                 lookahead=self.hps.lookahead,
                 gamma=self.hps.gamma,
@@ -240,6 +232,27 @@ class SPPAgent(object):
         out = {}
         for k, v in batches.items():
             out[k], _ = pack(v, "* d")  # equiv to: rearrange(v, "n b d -> (n b) d")
+        return out
+
+    @beartype
+    def sample_trjs_batch(self) -> Optional[dict[str, torch.Tensor]]:
+        """Sample (a) batch(es) of trajectories from the trajectory store(s)"""
+        assert self.traject_stores is not None
+
+        batches = defaultdict(list)
+        for ts in self.traject_stores:
+            batch = ts.sample(
+                self.hps.batch_size,
+                patcher=self.get_syn_rew if self.hps.historical_patching else None,
+            )
+            if batch is None:
+                logger.warn("sample method returned None, indicating that store is still empty")
+                return None
+            for k, v in batch.items():
+                batches[k].append(v)
+        out = {}
+        for k, v in batches.items():
+            out[k], _ = pack(v, "* t d")  # equiv to: rearrange(v, "n b t d -> (n b) t d")
         return out
 
     @beartype

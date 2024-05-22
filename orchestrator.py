@@ -396,25 +396,24 @@ def learn(cfg: DictConfig,
 
             gts = time.time()
             for _ in range(gs := cfg.g_steps):
-                # sample a batch of transitions from the replay buffer
-                batch = agent.sample_batch()
+                # sample a batch of transitions and trajectories
+                trns_batch = agent.sample_trns_batch()
+                trjs_batch = agent.sample_trjs_batch()
                 # determine if updating the actr
-                update_actr = not bool(
-                    agent.crit_updates_so_far % cfg.actor_update_delay)
+                update_actr = not bool(agent.crit_updates_so_far % cfg.actor_update_delay)
                 # update the actor and critic
-                agent.update_actr_crit(
-                    batch=batch,
-                    update_actr=update_actr,
-                )  # counters for actr and crit updates are incremented internally!
+                agent.update_actr_crit(trns_batch, update_actr=update_actr)
+                # counters for actr and crit updates are incremented internally!
                 gtl.append(time.time() - gts)
                 gts = time.time()
 
             dts = time.time()
             for _ in range(ds := cfg.d_steps):
                 # sample a batch of transitions from the replay buffer
-                batch = agent.sample_batch()
+                trns_batch = agent.sample_trns_batch()
                 # update the discriminator
-                agent.update_disc(batch)  # update counter incremented internally too
+                agent.update_disc(trns_batch)
+                # update counter incremented internally too
                 dtl.append(time.time() - dts)
                 dts = time.time()
 

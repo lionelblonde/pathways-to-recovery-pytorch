@@ -1,9 +1,11 @@
 from typing import Optional, Callable, ClassVar
 
 from beartype import beartype
-from einops import repeat, pack, rearrange
+from einops import repeat, pack, unpack, rearrange
 import numpy as np
 import torch
+
+from helpers import logger
 
 
 class RingBuffer(object):
@@ -77,7 +79,7 @@ class TrajectStore(object):
                 k: RingBuffer(self.capacity, self.pdd_shapes[k], self.device)})
 
     @beartype
-    def get_trns(self, idxs: torch.Tensor) -> dict[str, torch.Tensor]:
+    def get_trjs(self, idxs: torch.Tensor) -> dict[str, torch.Tensor]:
         """Collect a batch from indices"""
         trjs = {}
         for k, v in self.ring_buffers.items():
@@ -85,8 +87,16 @@ class TrajectStore(object):
         return trjs
 
     @beartype
-    def sample(self, batch_size: int) -> dict[str, torch.Tensor]:
+    def sample(self,
+               batch_size: int,
+               *,
+               patcher: Optional[Callable[[torch.Tensor, torch.Tensor, torch.Tensor],
+                                          torch.Tensor]],
+        ) -> Optional[dict[str, torch.Tensor]]:
         """Sample transitions uniformly from the replay buffer"""
+        if self.num_entries == 0:
+            logger.warn("trajectory store still empty; skipping for now")
+            return None
         idxs = torch.randint(
             low=0,
             high=self.num_entries,
@@ -94,11 +104,29 @@ class TrajectStore(object):
             generator=self.rng,
             device=self.device,
         )
-        return self.get_trns(idxs)
+        trjs = self.get_trjs(idxs)
+        if patcher is not None:
+            # patch the rewards
+            # get the shape of the reward tensor by packing it
+            _, rews_ps = pack([trjs["rews"]], "* d")
+            # pack the inputs of the reward patcher
+            obs0, _ = pack([trjs["obs0"]], "* d")
+            acs, _ = pack([trjs["acs"]], "* d")
+            obs1, _ = pack([trjs["obs1"]], "* d")
+            # obtain the new reward
+            rews = patcher(obs0, acs, obs1)
+            # get the reward in back in its nominal shape
+            # by unpacking it with the packing size from earlier
+            [trjs["rews"]] = unpack(rews, rews_ps, "* d")
+        return trjs
 
     @beartype
     def append(self, trj: list[dict[str, torch.Tensor]]):
         new_trj = self.rearrange_and_zeropad(trj)
+        assert "rews" in new_trj, "ensure transitions are always appended to the RB before the TS"
+        # it is necessary for each transition to first be added to the RB since its append method
+        # adds the reward to the reward ring buffer and then returns the augmented transition for
+        # the orchestrator to append to the currently ongoing trajectory, eventually stored here.
         for k in self.ring_buffers:
             self.ring_buffers[k].append(v=new_trj[k])
 
@@ -107,7 +135,7 @@ class TrajectStore(object):
         """Utility func that transforms a list of transitions (dictionaries)
         into a dictionary of an aggreagated and zero-padded tensor.
         """
-        tmp_trj = {k: [] for k in self.pdd_shapes}  # could use a defaultdict
+        tmp_trj = {k: [] for k in self.pdd_shapes}  # could use defaultdict but keys known
         pdd_trj = {}
         for e in trj:
             for k, v in e.items():
@@ -249,7 +277,7 @@ class ReplayBuffer(object):
                     la_batch["obs1_orig"].append(la_trns["obs1_orig"][td_len - 1])
                 if "acs_orig" in la_keys:
                     la_batch["acs_orig"].append(la_trns["acs_orig"][0])
-            # turn the list defaultdict into a dict of np.ndarray
+            # turn the list dict into a dict of np.ndarray
             trns = {k: pack(v, "* d")[0] for k, v in la_batch.items()}
             for k, v in trns.items():
                 assert v.device == self.device, f"v for {k=} is on wrong device"
