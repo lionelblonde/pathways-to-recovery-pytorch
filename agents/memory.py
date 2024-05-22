@@ -1,5 +1,4 @@
-from typing import Optional, Callable
-from collections import deque
+from typing import Optional, Callable, ClassVar
 
 from beartype import beartype
 from einops import repeat, pack, rearrange
@@ -53,7 +52,9 @@ class RingBuffer(object):
         return (self.start + self.length - 1) % self.maxlen
 
 
-class TrajectoryStore(object):
+class TrajectStore(object):
+
+    FILTRD_KEYS: ClassVar = ("obs0", "acs", "obs1", "dones1", "rews")  # tuple (immutable)
 
     @beartype
     def __init__(self,
@@ -64,13 +65,14 @@ class TrajectoryStore(object):
                  device: torch.device):
         """Replay buffer impl"""
         self.rng = generator
-        self.capacity = capacity
+        self.capacity = capacity // 100  # TODO(lionel): what to do here?
         self.seq_t_max = seq_t_max
         self.erb_shapes = erb_shapes
-        self.pdd_shapes = {k: (self.seq_t_max, *s) for k, s in self.erb_shapes.items()}
+        self.pdd_shapes = {
+            k: (self.seq_t_max, *s) for k, s in self.erb_shapes.items() if k in self.FILTRD_KEYS}
         self.device = device
         self.ring_buffers = {}
-        for k in self.erb_shapes:
+        for k in self.pdd_shapes:
             self.ring_buffers.update({
                 k: RingBuffer(self.capacity, self.pdd_shapes[k], self.device)})
 
@@ -98,7 +100,7 @@ class TrajectoryStore(object):
     def append(self, trj: list[dict[str, torch.Tensor]]):
         new_trj = self.rearrange_and_zeropad(trj)
         for k in self.ring_buffers:
-            self.ring_buffers[k].append(v=new_trj)
+            self.ring_buffers[k].append(v=new_trj[k])
 
     @beartype
     def rearrange_and_zeropad(self, trj: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -109,11 +111,11 @@ class TrajectoryStore(object):
         pdd_trj = {}
         for e in trj:
             for k, v in e.items():
-                tmp_trj[k].append(v)
+                if k not in self.FILTRD_KEYS:
+                    continue
+                tmp_trj[k].append(v.unsqueeze(dim=0))  # TODO(lionel): use einops here
         for k, v in tmp_trj.items():
-            if not isinstance(v, torch.Tensor):
-                raise TypeError(k)
-            tmp_trj_k = torch.cat(v).to(self.device)  # TODO(lionel): use einops here
+            tmp_trj_k = torch.cat(v, dim=0).to(self.device)  # TODO(lionel): use einops here
             pdd_trj[k] = torch.zeros(self.pdd_shapes[k], dtype=torch.float32, device=self.device)
             pdd_trj[k][:tmp_trj_k.size(0), :] = tmp_trj_k
         return pdd_trj
@@ -122,6 +124,13 @@ class TrajectoryStore(object):
     @property
     def num_entries(self) -> int:
         return len(self.ring_buffers["obs0"])  # could pick any other key
+
+    @beartype
+    @property
+    def how_filled(self) -> str:
+        num = f"{self.num_entries:,}".rjust(10)
+        denomi = f"{self.capacity:,}".rjust(10)
+        return f"{num} / {denomi}"
 
 
 class ReplayBuffer(object):
@@ -295,6 +304,13 @@ class ReplayBuffer(object):
     @property
     def num_entries(self) -> int:
         return len(self.ring_buffers["obs0"])  # could pick any other key
+
+    @beartype
+    @property
+    def how_filled(self) -> str:
+        num = f"{self.num_entries:,}".rjust(10)
+        denomi = f"{self.capacity:,}".rjust(10)
+        return f"{num} / {denomi}"
 
     @beartype
     def __repr__(self) -> str:

@@ -22,8 +22,6 @@ from helpers.misc_util import log_iter_info, prettify_numb
 from helpers.opencv_util import record_video
 from agents.spp_agent import SPPAgent
 
-from agents.memory import Trajectory
-
 
 DEBUG = False
 
@@ -40,6 +38,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
     ac_low, ac_high = env.action_space.low, env.action_space.high
 
     assert agent.replay_buffers is not None
+    assert agent.traject_stores is not None
 
     t = 0
 
@@ -88,17 +87,16 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
                 # add transition to the currently ongoing trajectory in the i-th env
                 ongoing_trajs[i].append(pp_out)
 
-                agent.traject_stores[i].append(ongoing_trajs[i])  # TEST LINE, NOT CORRECT PLCMT
-                # TODO(lionel): this should properly add the trajectory to the store
-
-                raise ValueError
-
                 if bool(pp_out["dones1"]) and (j + 1) == len(outs):
                     # second condition: if absorbing, there are two dones in a row -> stop at last
                     # since end of the trajectory, add the trajectory to the i-th trajectory store
                     agent.traject_stores[i].append(ongoing_trajs[i])
                     # reset the ongoing_trajs to an empty one
                     ongoing_trajs[i] = []
+
+                # log how filled the i-th replay buffer and i-th trajectory store are
+                logger.info(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
+                logger.info(f"ts#{i} (#entries)/capacity: {agent.traject_stores[i].how_filled}")
 
         # set current state with the next
         ob = deepcopy(new_ob)

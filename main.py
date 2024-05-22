@@ -16,7 +16,7 @@ import orchestrator
 from helpers import logger
 from helpers.env_makers import make_env
 from helpers.dataset import DemoDataset
-from agents.memory import ReplayBuffer
+from agents.memory import ReplayBuffer, TrajectStore
 from agents.spp_agent import SPPAgent
 
 
@@ -181,6 +181,16 @@ class MagicRunner(object):
         for i, rb in enumerate(replay_buffers):
             logger.info(f"rb#{i} [{rb}] is set")
 
+        traject_stores = [TrajectStore(
+            generator=torch.Generator(device).manual_seed(self._cfg.seed),
+            capacity=self._cfg.mem_size,
+            seq_t_max=1000,  # TODO(lionel): hard-code here from env info
+            erb_shapes=erb_shapes,
+            device=device,
+        ) for _ in range(self._cfg.num_env)]
+        for i, ts in enumerate(traject_stores):
+            logger.info(f"ts#{i} [{ts}] is set")
+
         def agent_wrapper():
             return SPPAgent(
                 net_shapes=net_shapes,
@@ -190,6 +200,7 @@ class MagicRunner(object):
                 actr_noise_rng=torch.Generator(device).manual_seed(self._cfg.seed),
                 expert_dataset=expert_dataset,
                 replay_buffers=replay_buffers,
+                traject_stores=traject_stores,
             )
 
         # create an evaluation environment not to mess up with training rollouts
@@ -260,6 +271,7 @@ class MagicRunner(object):
                 actr_noise_rng=torch.Generator(device).manual_seed(self._cfg.seed),
                 expert_dataset=None,
                 replay_buffers=None,
+                traject_stores=None,
             )
 
         # evaluate

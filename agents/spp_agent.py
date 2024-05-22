@@ -19,7 +19,7 @@ from helpers.dataset import DemoDataset
 from helpers.math_util import huber_quant_reg_loss
 from agents.nets import log_module_info, Actor, TanhGaussActor, Critic, Discriminator
 from agents.ac_noise import NormalActionNoise
-from agents.memory import ReplayBuffer
+from agents.memory import ReplayBuffer, TrajectStore
 
 
 class SPPAgent(object):
@@ -35,7 +35,8 @@ class SPPAgent(object):
                  hps: DictConfig,
                  actr_noise_rng: torch.Generator,
                  expert_dataset: Optional[DemoDataset],
-                 replay_buffers: Optional[list[ReplayBuffer]]):
+                 replay_buffers: Optional[list[ReplayBuffer]],
+                 traject_stores: Optional[list[TrajectStore]]):
 
         self.ob_shape, self.ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
         self.max_ac = max_ac
@@ -65,6 +66,9 @@ class SPPAgent(object):
 
         # replay buffer
         self.replay_buffers = replay_buffers
+
+        # trajectory store
+        self.traject_stores = traject_stores
 
         # critic
         # either C51 xor QR xor clipped double (for either TD3 or SAC)
