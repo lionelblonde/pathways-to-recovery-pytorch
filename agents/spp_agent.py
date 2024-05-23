@@ -114,9 +114,9 @@ class SPPAgent(object):
 
         # create online and target nets
 
-        self.hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
+        actr_hid_dims = crit_hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
 
-        actr_net_args = [self.ob_shape, self.ac_shape, self.hid_dims, self.rms_obs, self.max_ac]
+        actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
         actr_net_kwargs = {"layer_norm": self.hps.layer_norm}
         if not self.hps.prefer_td3_over_sac:
             actr_net_kwargs.update({
@@ -129,7 +129,7 @@ class SPPAgent(object):
             # using TD3 (SAC does not use a target actor)
             self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
 
-        crit_net_args = [self.ob_shape, self.ac_shape, self.hid_dims, self.rms_obs]
+        crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
         crit_net_kwargs_keys = ["layer_norm", "use_c51", "c51_num_atoms", "use_qr", "num_tau"]
         crit_net_kwargs = {k: getattr(self.hps, k) for k in crit_net_kwargs_keys}
         self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
@@ -148,7 +148,8 @@ class SPPAgent(object):
             self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
-        disc_net_args = [self.ob_shape, self.ac_shape, self.hps.d_hid_size, self.rms_obs]
+        disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
+        logger.info(f"discriminator net is using: {disc_hid_dims=}")
         disc_net_kwargs_keys = ["wrap_absorb", "d_batch_norm", "spectral_norm", "state_only"]
         disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
         self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
@@ -184,12 +185,11 @@ class SPPAgent(object):
 
         # TODO(lionel): create every new net at opt here
         # create the synthetic returns, bias, and gate nets
-        self.hps.xx_is_ob = True  # whether the "state" input are the env obs or rec hidden state
-        self.hps.rec_hid_shape = 100
-        assert isinstance(self.hps.rec_hid_shape, tuple)
         base_net_args = [
-            self.ob_shape if self.hps.xx_is_ob else self.hps.rec_hid_shape,
-            self.ac_shape, (100, 100), self.rms_obs]
+            (xx_shape := self.ob_shape if self.hps.xx_is_ob else (100,)),  # recurrent state shape
+            self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
+        assert isinstance(xx_shape, tuple), "the shape must be a tuple"
+        logger.info(f"base nets are using: {base_hid_dims=}")
         base_net_kwargs_keys = ["layer_norm", "xx_is_ob"]
         base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
         self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
@@ -206,6 +206,9 @@ class SPPAgent(object):
         if self.hps.clipped_double:
             log_module_info(self.twin)
         log_module_info(self.disc)
+        log_module_info(self.synthetic_return)
+        log_module_info(self.bias)
+        log_module_info(self.gate)
 
     @property
     def alpha(self):

@@ -63,7 +63,6 @@ c51_vmax: 100.
 num_tau: 200
 
 # AIL
-d_hid_size: 100
 g_steps: 1
 d_steps: 1
 d_lr: 5.0e-4
@@ -79,3 +78,6 @@ one_sided_pen: true
 historical_patching: true
 wrap_absorb: true
 d_batch_norm: false
+
+# pathways to recovery
+xx_is_ob: true
