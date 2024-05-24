@@ -1,4 +1,4 @@
-from typing import Optional, Callable, ClassVar
+from typing import Optional, Callable
 
 from beartype import beartype
 from einops import repeat, pack, unpack, rearrange
@@ -56,22 +56,22 @@ class RingBuffer(object):
 
 class TrajectStore(object):
 
-    FILTRD_KEYS: ClassVar = ("obs0", "acs", "obs1", "dones1", "rews")  # tuple (immutable)
-
     @beartype
     def __init__(self,
                  generator: torch.Generator,
                  capacity: int,
                  seq_t_max: int,
                  erb_shapes: dict[str, tuple[int, ...]],
+                 *,
                  device: torch.device):
         """Replay buffer impl"""
         self.rng = generator
         self.capacity = capacity // 100  # TODO(lionel): what to do here?
         self.seq_t_max = seq_t_max
         self.erb_shapes = erb_shapes
+        self.erb_shapes.pop("dones1", None)  # remove unused key to save on memory
         self.pdd_shapes = {
-            k: (self.seq_t_max, *s) for k, s in self.erb_shapes.items() if k in self.FILTRD_KEYS}
+            k: (self.seq_t_max, *s) for k, s in self.erb_shapes.items()}
         self.device = device
         self.ring_buffers = {}
         for k in self.pdd_shapes:
@@ -107,17 +107,26 @@ class TrajectStore(object):
         trjs = self.get_trjs(idxs)
         if patcher is not None:
             # patch the rewards
-            # get the shape of the reward tensor by packing it
-            _, rews_ps = pack([trjs["rews"]], "* d")
-            # pack the inputs of the reward patcher
-            obs0, _ = pack([trjs["obs0"]], "* d")
-            acs, _ = pack([trjs["acs"]], "* d")
-            obs1, _ = pack([trjs["obs1"]], "* d")
-            # obtain the new reward
-            rews = patcher(obs0, acs, obs1)
-            # get the reward in back in its nominal shape
-            # by unpacking it with the packing size from earlier
-            [trjs["rews"]] = unpack(rews, rews_ps, "* d")
+            with torch.no_grad():
+                # get the shape of the reward tensor by packing it
+                _, rews_ps = pack([(rew := trjs["rews"])], "* d")
+                # build a mask to identify the zero-padding
+                mask = rew.clone().detach()  # security detach
+                mask[mask > 0.] = 1
+                mask[mask < 0.] = 1
+                mask[mask == 0.] = 0
+                # pack the inputs of the reward patcher
+                obs0, _ = pack([trjs["obs0"]], "* d")
+                acs, _ = pack([trjs["acs"]], "* d")
+                obs1, _ = pack([trjs["obs1"]], "* d")
+                # obtain the new reward
+                rews = patcher(obs0, acs, obs1)
+                # get the reward in back in its nominal shape
+                # by unpacking it with the packing size from earlier
+                [trjs["rews"]] = unpack(rews, rews_ps, "* d")
+                # apply mask to remove rewards computed on zero-padding
+                assert mask.size() == trjs["rews"].size(), "wrong shape"
+                trjs["rews"] *= mask
         return trjs
 
     @beartype
@@ -139,7 +148,7 @@ class TrajectStore(object):
         pdd_trj = {}
         for e in trj:
             for k, v in e.items():
-                if k not in self.FILTRD_KEYS:
+                if k not in self.pdd_shapes:
                     continue
                 tmp_trj[k].append(rearrange(v, "d -> 1 d"))
         for k, v in tmp_trj.items():
@@ -239,8 +248,9 @@ class ReplayBuffer(object):
                 # collect the batch for the lookahead rollout indices
                 la_trns = self.get_trns(la_idxs)
                 if patcher is not None:
-                    # patch the rewards
-                    la_trns["rews"] = patcher(la_trns["obs0"], la_trns["acs"], la_trns["obs1"])
+                    with torch.no_grad():
+                        # patch the rewards
+                        la_trns["rews"] = patcher(la_trns["obs0"], la_trns["acs"], la_trns["obs1"])
                 # only keep data from the current episode,
                 # drop everything after episode reset, if any
                 dones = la_trns["dones1"]
@@ -285,7 +295,8 @@ class ReplayBuffer(object):
             trns = self.get_trns(idxs)
             if patcher is not None:
                 # patch the rewards
-                trns["rews"] = patcher(trns["obs0"], trns["acs"], trns["obs1"])
+                with torch.no_grad():
+                    trns["rews"] = patcher(trns["obs0"], trns["acs"], trns["obs1"])
         return trns
 
     @beartype
