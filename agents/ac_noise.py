@@ -17,7 +17,7 @@ class NormalActionNoise(ActionNoise):
         assert isinstance(mu, torch.Tensor) and isinstance(sigma, torch.Tensor)
         self.mu = mu
         self.sigma = sigma
-        self.device = self.mu.device  # grap the device we are on (assumed sigma and mu on same)
+        self.device = self.mu.device  # grab the device we are on (assumed sigma and mu on same)
         self.rng = generator
 
     @beartype
