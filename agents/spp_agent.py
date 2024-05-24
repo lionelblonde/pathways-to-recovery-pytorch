@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Optional, Union
 from collections import defaultdict
@@ -5,6 +6,7 @@ from collections import defaultdict
 from beartype import beartype
 from omegaconf import DictConfig
 from einops import repeat, rearrange, pack
+from termcolor import colored
 import wandb
 import numpy as np
 import torch
@@ -183,7 +185,6 @@ class SPPAgent(object):
         )
         logger.info(f"{t_max = }")
 
-        # TODO(lionel): create every new net at opt here
         # create the synthetic returns, bias, and gate nets
         base_net_args = [
             (xx_shape := self.ob_shape if self.hps.xx_is_ob else (100,)),  # recurrent state shape
@@ -196,11 +197,11 @@ class SPPAgent(object):
         self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
         self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
         # define their optimizers
-        # TODO(lionel): figure out what lr to use for those guys (hard-coded for now)
         self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
         self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
         self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
 
+        # log module architectures
         log_module_info(self.actr)
         log_module_info(self.crit)
         if self.hps.clipped_double:
@@ -513,9 +514,9 @@ class SPPAgent(object):
     @beartype
     def update_actr_crit(self,
                          trns_batch: dict[str, torch.Tensor],
-                         trjs_batch: Optional[dict[str, torch.Tensor]],
                          *,
-                         update_actr: bool):
+                         update_actr: bool,
+                         use_sr: bool):
         """Update the critic and the actor"""
 
         with torch.no_grad():
@@ -531,9 +532,12 @@ class SPPAgent(object):
             reward = trns_batch["rews"]
             done = trns_batch["dones1"].float()
             td_len = trns_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
-
-            if trjs_batch is not None:
-                print(trjs_batch["obs0"].size())
+            # compute sr while still in the no-grad context manager: no need to detach by hand
+            if use_sr:
+                # compute the sr values for the (s, a) pairs
+                sr = self.synthetic_return(state, action)
+                # modify the rewards by interpolating them with the sr values
+                reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
 
         # update the observation normalizer
         self.rms_obs.update(state)
@@ -554,8 +558,8 @@ class SPPAgent(object):
 
         # compute critic and actor losses
         actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
-            state, action, next_state, next_action, reward, done, td_len,
-        )  # if `twin_loss` is None at this point, it means we are using C51 or QR
+            state, action, next_state, next_action, reward, done, td_len)
+        # if `twin_loss` is None at this point, it means we are using C51 or QR
 
         if update_actr or (not self.hps.prefer_td3_over_sac):
             # choice: for SAC, always update the actor and log(alpha)
@@ -620,8 +624,92 @@ class SPPAgent(object):
             self.update_target_net()
 
     @beartype
-    def update_disc(self, batch: dict[str, torch.Tensor]):
+    def compute_sr_loss_batch2dseq1d(self,
+                                     state: torch.Tensor,
+                                     action: torch.Tensor,
+                                     reward: torch.Tensor,
+                                     mask: torch.Tensor) -> torch.Tensor:
+        """Compute sr loss batchwise along 2D and sequentially along 1D (bench only)"""
+        srs = time.time()
 
+        effective_batch_size, seq_t_max, _ = state.size()
+        loss = torch.zeros((effective_batch_size, 1)).to(self.device)
+        csum = torch.zeros((effective_batch_size, 1)).to(self.device)
+        for t in range(seq_t_max):
+            slices = (state[:, t, :], action[:, t, :])
+            gated_sum = self.gate(*slices) * csum
+            bias = self.bias(*slices)
+            loss += mask[:, t, :] * (reward[:, t, :] - gated_sum - bias).pow(2)
+            csum += mask[:, t, :] * self.synthetic_return(*slices)
+        loss = loss.sum() / mask.sum()
+
+        sre = time.time() - srs
+        logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
+        # note: leaving the time logging inside the function for benchmarking
+        return loss
+
+    @beartype
+    def compute_sr_loss_batch3dseq0d(self,
+                                     state: torch.Tensor,
+                                     action: torch.Tensor,
+                                     reward: torch.Tensor,
+                                     mask: torch.Tensor) -> torch.Tensor:
+        """Compute sr loss batchwise in 3D"""
+        srs = time.time()
+
+        _, seq_t_max, _ = state.size()
+        state = rearrange(state,
+            "b t d -> (b t) d")
+        action = rearrange(action,
+            "b t d -> (b t) d")
+        inputs = (state, action)
+        synthetic_return = rearrange(self.synthetic_return(*inputs),
+            "(b t) d -> b t d", t=seq_t_max)
+        bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
+        loss = mask * (reward - gated_sum - bias)
+        loss = loss.pow(2).sum() / mask.sum()
+
+        sre = time.time() - srs
+        logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
+        # note: leaving the time logging inside the function for benchmarking
+        return loss
+
+    @beartype
+    def update_sr(self, trjs_batch: dict[str, torch.Tensor]):
+        """Update the sr components"""
+        with torch.no_grad():
+            # define inputs
+            if self.hps.wrap_absorb:
+                state = trjs_batch["obs0_orig"]
+                action = trjs_batch["acs_orig"]
+            else:
+                state = trjs_batch["obs0"]
+                action = trjs_batch["acs"]
+            reward = trjs_batch["rews"]
+            mask = reward.clone().detach()  # security detach
+            mask[mask > 0.] = 1
+            mask[mask < 0.] = 1
+            mask[mask == 0.] = 0
+        logger.info(f"num of non-masked elements: {mask.sum()}")
+        # note: also contains the obs1/obs1_orig key, which is only used for reward patching
+
+        # compute the sr loss using full-batch ops
+        sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
+
+        # update parameters
+        self.synthetic_return_opt.zero_grad()
+        self.bias_opt.zero_grad()
+        self.gate_opt.zero_grad()
+        sr_loss.backward()
+        self.synthetic_return_opt.step()
+        self.bias_opt.step()
+        self.gate_opt.step()
+
+    @beartype
+    def update_disc(self, trns_batch: dict[str, torch.Tensor]):
+        """Update the discriminator"""
         assert self.expert_dataset is not None
 
         # filter out the keys we want
@@ -637,7 +725,7 @@ class SPPAgent(object):
         with torch.no_grad():
 
             # filter out unwanted keys and tensor-ify
-            p_batch = {k: batch[k] for k in d_keys}
+            p_batch = {k: trns_batch[k] for k in d_keys}
 
             # get a batch of samples from the expert dataset
             e_batches = defaultdict(list)
