@@ -5,9 +5,9 @@ from functools import partial
 from typing import Union, Callable
 
 from beartype import beartype
+from omegaconf import OmegaConf, DictConfig
 from einops import rearrange
 from termcolor import colored
-from omegaconf import OmegaConf, DictConfig
 import wandb
 from wandb.errors import CommError
 import numpy as np
@@ -399,10 +399,12 @@ def learn(cfg: DictConfig,
                 # sample a batch of transitions and trajectories
                 trns_batch = agent.sample_trns_batch()
                 trjs_batch = agent.sample_trjs_batch()
+                if (use_sr := trjs_batch is not None):
+                    agent.update_sr(trjs_batch)
                 # determine if updating the actr
                 update_actr = not bool(agent.crit_updates_so_far % cfg.actor_update_delay)
                 # update the actor and critic
-                agent.update_actr_crit(trns_batch, trjs_batch, update_actr=update_actr)
+                agent.update_actr_crit(trns_batch, update_actr=update_actr, use_sr=use_sr)
                 # counters for actr and crit updates are incremented internally!
                 gtl.append(time.time() - gts)
                 gts = time.time()
