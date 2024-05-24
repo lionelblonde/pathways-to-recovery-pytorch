@@ -698,6 +698,7 @@ class SPPAgent(object):
         # compute the sr loss using full-batch ops
         sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
 
+        srs = time.time()
         # update parameters
         self.synthetic_return_opt.zero_grad()
         self.bias_opt.zero_grad()
@@ -706,6 +707,8 @@ class SPPAgent(object):
         self.synthetic_return_opt.step()
         self.bias_opt.step()
         self.gate_opt.step()
+        sre = time.time() - srs
+        logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
 
     @beartype
     def update_disc(self, trns_batch: dict[str, torch.Tensor]):
