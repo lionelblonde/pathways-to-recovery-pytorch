@@ -60,7 +60,14 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
             yield
 
         # interact with env
-        new_ob, _, terminated, truncated, _ = env.step(ac)  # reward and info ignored
+        new_ob, _, terminated, truncated, info = env.step(ac)  # reward ignored
+
+        if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
+            logger.warn(f"{terminated=} | {truncated=}")
+            assert isinstance(terminated, np.ndarray)
+            assert isinstance(truncated, np.ndarray)
+            assert terminated.shape == truncated.shape
+
         if not isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
             assert isinstance(env, Env)
             done, terminated = np.array([terminated or truncated]), np.array([terminated])
@@ -73,8 +80,9 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
 
         tr_or_vtr = [ob, ac, new_ob, done, terminated]
+
         if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
-            pp_func = partial(postproc_vtr, env.num_envs)
+            pp_func = partial(postproc_vtr, env.num_envs, info)
         else:
             assert isinstance(env, Env)
             pp_func = postproc_tr
@@ -89,6 +97,12 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
 
                 if bool(pp_out["dones1"]) and (j + 1) == len(outs):
                     # second condition: if absorbing, there are two dones in a row -> stop at last
+
+                    if len(ongoing_trajs[i]) >= (length := agent.traject_stores[i].seq_t_max):
+                        logger.warn("for some reason, the current trajectory is too long")
+                        # TODO(lionel): find out why this is happening
+                        ongoing_trajs[i] = ongoing_trajs[i][-length:]
+
                     # since end of the trajectory, add the trajectory to the i-th trajectory store
                     agent.traject_stores[i].append(ongoing_trajs[i])
                     # reset the ongoing_trajs to an empty one
@@ -111,6 +125,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
 
 @beartype
 def postproc_vtr(num_envs: int,
+                 info: dict[str, np.ndarray],
                  vtr: list[np.ndarray],
                  ob_shape: tuple[int, ...],
                  ac_shape: tuple[int, ...],
@@ -122,6 +137,11 @@ def postproc_vtr(num_envs: int,
     vouts = []
     for i in range(num_envs):
         tr = [e[i] for e in vtr]
+        ob, ac, _, done, terminated = tr
+        if "final_observation" in info:
+            if bool(info["_final_observation"][i]):
+                logger.warn("writing over new_ob with info[final_observation]")
+                tr = [ob, ac, info["final_observation"][i], done, terminated]
         outs = postproc_tr(tr, ob_shape, ac_shape, wrap_absorb=wrap_absorb)
         vouts.extend(outs)
     return vouts
