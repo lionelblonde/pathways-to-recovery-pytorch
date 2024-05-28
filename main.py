@@ -184,7 +184,7 @@ class MagicRunner(object):
         traject_stores = [TrajectStore(
             generator=torch.Generator(device).manual_seed(self._cfg.seed),
             capacity=self._cfg.mem_size,
-            seq_t_max=1000,  # TODO(lionel): hard-code here from env info
+            seq_t_max=max_ep_steps,
             erb_shapes=erb_shapes,
             device=device,
         ) for _ in range(self._cfg.num_env)]
