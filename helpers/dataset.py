@@ -102,6 +102,7 @@ class DemoDataset(object):
 
             # determine if terminal because of timeout or real termination
             terminal = self.ep_len != max_ep_steps
+            logger.info(f"is the trj terminated? {self.ep_len}/{max_ep_steps} -> {terminal}")
 
             # subsample trajectory: trajectories are not contiguous sequences
             sub_rate = 20  # N=20 in the original GAIL paper
