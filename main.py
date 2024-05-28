@@ -150,7 +150,7 @@ class MagicRunner(object):
         torch.cuda.manual_seed_all(self._cfg.seed)
 
         # env
-        env, net_shapes, erb_shapes, max_ac, max_episode_steps = make_env(
+        env, net_shapes, erb_shapes, max_ac, max_ep_steps = make_env(
             self._cfg.env_id,
             vectorized=self._cfg.vecenv,
             num_envs=self._cfg.numenv,
@@ -167,7 +167,7 @@ class MagicRunner(object):
             device=device,
             expert_path=self._cfg.expert_path,
             num_demos=self._cfg.num_demos,
-            max_ep_steps=max_episode_steps,
+            max_ep_steps=max_ep_steps,
             wrap_absorb=self._cfg.wrap_absorb,
         )
         logger.info(f"dd#0 [{expert_dataset}] is set")
