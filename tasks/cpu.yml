@@ -36,7 +36,7 @@ targ_up_freq: 100
 n_step_returns: false
 lookahead: 5
 ret_norm: false
-prefer_td3_over_sac: false
+prefer_td3_over_sac: true
 
 # TD3
 normal_noise_std: 0.1
