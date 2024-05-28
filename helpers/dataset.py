@@ -63,6 +63,10 @@ class DemoDataset(object):
         self.data = defaultdict(list)
         logger.info("::::loading demos")
 
+        if wrap_absorb:
+            # we added one before if wrapping the absorbing transitions
+            max_ep_steps -= 1
+
         # go over the demos, sorted in alphabetical order
         for i, f in enumerate(sorted(Path(expert_path).glob("*.h5"))):
 
