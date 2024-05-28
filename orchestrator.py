@@ -79,7 +79,9 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         # read about what truncation means at the link below:
         # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
 
-        tr_or_vtr = [ob, ac, new_ob, done, terminated]
+        tr_or_vtr = [ob, ac, new_ob, terminated]
+        # note: we use terminated as a done replacement, but keep the key "dones1"
+        # because it is the key used in the demo files
 
         if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
             pp_func = partial(postproc_vtr, env.num_envs, info)
@@ -137,11 +139,11 @@ def postproc_vtr(num_envs: int,
     vouts = []
     for i in range(num_envs):
         tr = [e[i] for e in vtr]
-        ob, ac, _, done, terminated = tr
+        ob, ac, _, terminated = tr
         if "final_observation" in info:
             if bool(info["_final_observation"][i]):
                 logger.warn("writing over new_ob with info[final_observation]")
-                tr = [ob, ac, info["final_observation"][i], done, terminated]
+                tr = [ob, ac, info["final_observation"][i], terminated]
         outs = postproc_tr(tr, ob_shape, ac_shape, wrap_absorb=wrap_absorb)
         vouts.extend(outs)
     return vouts
@@ -154,7 +156,7 @@ def postproc_tr(tr: list[np.ndarray],
                 *,
                 wrap_absorb: bool) -> list[tuple[dict[str, np.ndarray], ...]]:
 
-    ob, ac, new_ob, done, terminated = tr
+    ob, ac, new_ob, terminated = tr
 
     if wrap_absorb:
 
@@ -169,7 +171,7 @@ def postproc_tr(tr: list[np.ndarray],
                 "obs0": ob_0,
                 "acs": ac_0,
                 "obs1": new_ob_zeros_1,
-                "dones1": done,
+                "dones1": terminated,
                 "obs0_orig": ob,
                 "acs_orig": ac,
                 "obs1_orig": new_ob,
@@ -182,7 +184,7 @@ def postproc_tr(tr: list[np.ndarray],
                 "obs0": ob_zeros_1,
                 "acs": ac_zeros_1,
                 "obs1": new_ob_zeros_1,
-                "dones1": done,
+                "dones1": terminated,
                 "obs0_orig": ob,  # from previous transition, with reward eval on absorbing
                 "acs_orig": ac,  # from previous transition, with reward eval on absorbing
                 "obs1_orig": new_ob,  # from previous transition, with reward eval on absorbing
@@ -194,7 +196,7 @@ def postproc_tr(tr: list[np.ndarray],
             "obs0": ob_0,
             "acs": ac_0,
             "obs1": new_ob_0,
-            "dones1": done,
+            "dones1": terminated,
             "obs0_orig": ob,
             "acs_orig": ac,
             "obs1_orig": new_ob,
@@ -205,7 +207,7 @@ def postproc_tr(tr: list[np.ndarray],
         "obs0": ob,
         "acs": ac,
         "obs1": new_ob,
-        "dones1": done,
+        "dones1": terminated,
     }
     return [(transition,)]
 
