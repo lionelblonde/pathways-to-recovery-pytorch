@@ -153,7 +153,10 @@ def make_farama_mujoco_env(
     # (Farama's Gymnasium make the distinction now in the `step` output)
     # now it is just needed to wrap the absorbing states in the demo dataset
     assert env.spec is not None
-    max_env_steps = env.spec.max_episode_steps
-    assert max_env_steps is not None
+    max_ep_steps = env.spec.max_episode_steps
+    assert max_ep_steps is not None
+    if wrap_absorb:
+        # when wrapping with absorbing states, count the extra transition
+        max_ep_steps += 1
 
-    return env, net_shapes, erb_shapes, max_ac, max_env_steps
+    return env, net_shapes, erb_shapes, max_ac, max_ep_steps
