@@ -17,7 +17,7 @@ from helpers import logger
 from helpers.env_makers import make_env
 from helpers.dataset import DemoDataset
 from agents.memory import ReplayBuffer, TrajectStore
-from agents.spp_agent import SPPAgent
+from agents.eve_agent import EveAgent
 
 
 @beartype
@@ -192,7 +192,7 @@ class MagicRunner(object):
             logger.info(f"ts#{i} [{ts}] is set")
 
         def agent_wrapper():
-            return SPPAgent(
+            return EveAgent(
                 net_shapes=net_shapes,
                 max_ac=max_ac,
                 device=device,
@@ -263,7 +263,7 @@ class MagicRunner(object):
 
         # create an agent wrapper
         def agent_wrapper():
-            return SPPAgent(
+            return EveAgent(
                 net_shapes=net_shapes,
                 max_ac=max_ac,
                 device=device,

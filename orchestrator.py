@@ -20,7 +20,7 @@ from gymnasium.experimental.vector.sync_vector_env import SyncVectorEnv
 from helpers import logger
 from helpers.misc_util import log_iter_info, prettify_numb
 from helpers.opencv_util import record_video
-from agents.spp_agent import SPPAgent
+from agents.eve_agent import EveAgent
 
 
 DEBUG = False
@@ -28,7 +28,7 @@ DEBUG = False
 
 @beartype
 def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
-            agent: SPPAgent,
+            agent: EveAgent,
             seed: int,
             segment_len: int,
             *,
@@ -214,7 +214,7 @@ def postproc_tr(tr: list[np.ndarray],
 
 @beartype
 def episode(env: Env,
-            agent: SPPAgent,
+            agent: EveAgent,
             seed: int):
     # generator that spits out a trajectory collected during a single episode
     # `append` operation is also significantly faster on lists than numpy arrays,
@@ -280,7 +280,7 @@ def episode(env: Env,
 @beartype
 def evaluate(cfg: DictConfig,
              env: Env,
-             agent_wrapper: Callable[[], SPPAgent],
+             agent_wrapper: Callable[[], EveAgent],
              name: str):
 
     assert isinstance(cfg, DictConfig)
@@ -334,7 +334,7 @@ def evaluate(cfg: DictConfig,
 def learn(cfg: DictConfig,
           env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
           eval_env: Env,
-          agent_wrapper: Callable[[], SPPAgent],
+          agent_wrapper: Callable[[], EveAgent],
           name: str):
 
     assert isinstance(cfg, DictConfig)

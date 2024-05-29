@@ -24,7 +24,7 @@ from agents.ac_noise import NormalActionNoise
 from agents.memory import ReplayBuffer, TrajectStore
 
 
-class SPPAgent(object):
+class EveAgent(object):
 
     MAGIC_FACTOR: float = 0.1
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
