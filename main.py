@@ -187,6 +187,7 @@ class MagicRunner(object):
             capacity=self._cfg.tsx_capacity,
             em_mxlen=self._cfg.em_mxlen,
             erb_shapes=erb_shapes,
+            state_only=self._cfg.state_only,
             device=device,
         ) for _ in range(self._cfg.num_env)]
         for i, ts in enumerate(traject_stores):

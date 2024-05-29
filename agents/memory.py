@@ -63,13 +63,23 @@ class TrajectStore(object):
                  em_mxlen: int,
                  erb_shapes: dict[str, tuple[int, ...]],
                  *,
+                 state_only: bool,  # state-only discriminator
                  device: torch.device):
         """Replay buffer impl"""
         self.rng = generator
         self.capacity = capacity
         self.em_mxlen = em_mxlen
         self.erb_shapes = erb_shapes
-        self.erb_shapes.pop("dones1", None)  # remove unused key to save on memory
+        self.state_only = state_only
+        # remove unused key to save on memory
+        self.erb_shapes.pop("dones1", None)
+        if self.state_only:
+            self.erb_shapes.pop("acs", None)
+            self.erb_shapes.pop("acs_orig", None)
+        else:
+            self.erb_shapes.pop("obs1", None)
+            self.erb_shapes.pop("obs1_orig", None)
+
         self.pdd_shapes = {
             k: (self.em_mxlen, *s) for k, s in self.erb_shapes.items()}
         self.device = device
@@ -90,7 +100,9 @@ class TrajectStore(object):
     def sample(self,
                batch_size: int,
                *,
-               patcher: Optional[Callable[[torch.Tensor, torch.Tensor, torch.Tensor],
+               patcher: Optional[Callable[[torch.Tensor,
+                                           Optional[torch.Tensor],
+                                           Optional[torch.Tensor]],
                                           torch.Tensor]],
         ) -> Optional[dict[str, torch.Tensor]]:
         """Sample transitions uniformly from the replay buffer"""
@@ -117,8 +129,12 @@ class TrajectStore(object):
                 mask[mask == 0.] = 0
                 # pack the inputs of the reward patcher
                 obs0, _ = pack([trjs["obs0"]], "* d")
-                acs, _ = pack([trjs["acs"]], "* d")
-                obs1, _ = pack([trjs["obs1"]], "* d")
+                if self.state_only:
+                    acs = None
+                    obs1, _ = pack([trjs["obs1"]], "* d")
+                else:
+                    acs, _ = pack([trjs["acs"]], "* d")
+                    obs1 = None
                 # obtain the new reward
                 rews = patcher(obs0, acs, obs1)
                 # get the reward in back in its nominal shape
@@ -214,7 +230,9 @@ class ReplayBuffer(object):
     def sample(self,
                batch_size: int,
                *,
-               patcher: Optional[Callable[[torch.Tensor, torch.Tensor, torch.Tensor],
+               patcher: Optional[Callable[[torch.Tensor,
+                                           Optional[torch.Tensor],
+                                           Optional[torch.Tensor]],
                                           torch.Tensor]],
                n_step_returns: bool = False,
                lookahead: Optional[int] = None,

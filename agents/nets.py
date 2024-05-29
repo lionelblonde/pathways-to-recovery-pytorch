@@ -427,8 +427,8 @@ class Base(nn.Module):
         ac_dim = ac_shape[-1]
         self.rms_obs = rms_obs
         self.xx_is_ob = xx_is_ob
-        self.sigmoid_o = sigmoid_o
         self.layer_norm = layer_norm
+        self.sigmoid_o = sigmoid_o
 
         # assemble the last layers and output heads
         self.fc_stack = nn.Sequential(OrderedDict([

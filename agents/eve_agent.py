@@ -862,8 +862,8 @@ class EveAgent(object):
     @beartype
     def get_syn_rew(self,
                     state: torch.Tensor,
-                    action: torch.Tensor,
-                    next_state: torch.Tensor) -> torch.Tensor:
+                    action: Optional[torch.Tensor],
+                    next_state: Optional[torch.Tensor]) -> torch.Tensor:
         # beartype should hangle the type asserts
         # define the discriminator inputs
         input_a = state
