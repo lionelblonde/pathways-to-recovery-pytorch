@@ -102,7 +102,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
 
                     if len(ongoing_trajs[i]) >= (length := agent.traject_stores[i].seq_t_max):
                         logger.warn("for some reason, the current trajectory is too long")
-                        # TODO(lionel): find out why this is happening
+                        # TODO(lionel): find out why this is happening (Gymnasium bug?)
                         ongoing_trajs[i] = ongoing_trajs[i][-length:]
 
                     # since end of the trajectory, add the trajectory to the i-th trajectory store
