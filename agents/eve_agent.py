@@ -533,11 +533,11 @@ class SPPAgent(object):
             done = trns_batch["dones1"].float()
             td_len = trns_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
             # compute sr while still in the no-grad context manager: no need to detach by hand
-            if use_sr:
-                # compute the sr values for the (s, a) pairs
-                sr = self.synthetic_return(state, action)
-                # modify the rewards by interpolating them with the sr values
-                reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
+            # if use_sr:
+            #     # compute the sr values for the (s, a) pairs
+            #     sr = self.synthetic_return(state, action)
+            #     # modify the rewards by interpolating them with the sr values
+            #     reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
 
         # update the observation normalizer
         self.rms_obs.update(state)
@@ -695,20 +695,20 @@ class SPPAgent(object):
         logger.info(f"num of non-masked elements: {mask.sum()}")
         # note: also contains the obs1/obs1_orig key, which is only used for reward patching
 
-        # compute the sr loss using full-batch ops
-        sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
-
-        srs = time.time()
-        # update parameters
-        self.synthetic_return_opt.zero_grad()
-        self.bias_opt.zero_grad()
-        self.gate_opt.zero_grad()
-        sr_loss.backward()
-        self.synthetic_return_opt.step()
-        self.bias_opt.step()
-        self.gate_opt.step()
-        sre = time.time() - srs
-        logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
+        # # compute the sr loss using full-batch ops
+        # sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
+        #
+        # srs = time.time()
+        # # update parameters
+        # self.synthetic_return_opt.zero_grad()
+        # self.bias_opt.zero_grad()
+        # self.gate_opt.zero_grad()
+        # sr_loss.backward()
+        # self.synthetic_return_opt.step()
+        # self.bias_opt.step()
+        # self.gate_opt.step()
+        # sre = time.time() - srs
+        # logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
 
     @beartype
     def update_disc(self, trns_batch: dict[str, torch.Tensor]):
