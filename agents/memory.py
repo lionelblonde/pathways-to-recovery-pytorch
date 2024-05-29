@@ -66,7 +66,7 @@ class TrajectStore(object):
                  device: torch.device):
         """Replay buffer impl"""
         self.rng = generator
-        self.capacity = capacity // 500  # TODO(lionel): what to do here?
+        self.capacity = capacity
         self.seq_t_max = seq_t_max
         self.erb_shapes = erb_shapes
         self.erb_shapes.pop("dones1", None)  # remove unused key to save on memory
