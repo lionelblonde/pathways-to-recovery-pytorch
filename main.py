@@ -181,10 +181,11 @@ class MagicRunner(object):
         for i, rb in enumerate(replay_buffers):
             logger.info(f"rb#{i} [{rb}] is set")
 
+        assert self._cfg.em_mxlen <= max_ep_steps, "episodic memory contains at most one episode"
         traject_stores = [TrajectStore(
             generator=torch.Generator(device).manual_seed(self._cfg.seed),
             capacity=self._cfg.tsx_capacity,
-            seq_t_max=max_ep_steps,
+            em_mxlen=self._cfg.em_mxlen,
             erb_shapes=erb_shapes,
             device=device,
         ) for _ in range(self._cfg.num_env)]

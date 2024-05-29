@@ -3,6 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 from functools import partial
 from typing import Union, Callable
+from collections import deque
 
 from beartype import beartype
 from omegaconf import OmegaConf, DictConfig
@@ -42,8 +43,10 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
 
     t = 0
 
-    ongoing_trajs = [[] for _ in range(
-        env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)) else 1)]
+    ongoing_trajs = [deque([], maxlen=(length := agent.traject_stores[0].em_mxlen))
+        for _ in range(env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)) else 1)]
+    # as usual, index 0 chosen because it always exists whether vecencs are used or not
+    logger.warn(f"the ongoing trajects are stored in deques of {length=}")
 
     ob, _ = env.reset(seed=seed)  # seed is a keyword argument, not positional
 
@@ -100,15 +103,14 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
                 if bool(pp_out["dones1"]) and (j + 1) == len(outs):
                     # second condition: if absorbing, there are two dones in a row -> stop at last
 
-                    if len(ongoing_trajs[i]) >= (length := agent.traject_stores[i].seq_t_max):
-                        logger.warn("for some reason, the current trajectory is too long")
-                        # TODO(lionel): find out why this is happening (Gymnasium bug?)
-                        ongoing_trajs[i] = ongoing_trajs[i][-length:]
+                    # the env time limit set by TimeLimit wrapper was once not respected
+                    # and all reproducibility effort did not conclude with an conclusive answer
+                    # TODO(lionel): find out why this is happening (Gymnasium bug?)
 
                     # since end of the trajectory, add the trajectory to the i-th trajectory store
-                    agent.traject_stores[i].append(ongoing_trajs[i])
+                    agent.traject_stores[i].append(list(ongoing_trajs[i]))
                     # reset the ongoing_trajs to an empty one
-                    ongoing_trajs[i] = []
+                    ongoing_trajs[i] = deque([], maxlen=length)
 
                 # log how filled the i-th replay buffer and i-th trajectory store are
                 logger.info(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")

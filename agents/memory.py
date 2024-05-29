@@ -60,18 +60,18 @@ class TrajectStore(object):
     def __init__(self,
                  generator: torch.Generator,
                  capacity: int,
-                 seq_t_max: int,
+                 em_mxlen: int,
                  erb_shapes: dict[str, tuple[int, ...]],
                  *,
                  device: torch.device):
         """Replay buffer impl"""
         self.rng = generator
         self.capacity = capacity
-        self.seq_t_max = seq_t_max
+        self.em_mxlen = em_mxlen
         self.erb_shapes = erb_shapes
         self.erb_shapes.pop("dones1", None)  # remove unused key to save on memory
         self.pdd_shapes = {
-            k: (self.seq_t_max, *s) for k, s in self.erb_shapes.items()}
+            k: (self.em_mxlen, *s) for k, s in self.erb_shapes.items()}
         self.device = device
         self.ring_buffers = {}
         for k in self.pdd_shapes:
