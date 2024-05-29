@@ -796,7 +796,7 @@ class EveAgent(object):
         disc_loss.backward()
         self.disc_opt.step()
 
-        self.disc_updates_so_far += 1  # count this as one update
+        self.disc_updates_so_far += 1
 
         if self.disc_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             wandb_dict = {
