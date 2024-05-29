@@ -492,9 +492,11 @@ def learn(cfg: DictConfig,
 
             # log stats in dashboard
             assert agent.replay_buffers is not None
+            assert agent.traject_stores is not None
             agent.send_to_dash(
                 {**{f"{k}-mean": v.mean() for k, v in eval_metrics.items()},
                  "rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
+                 "tsx-num-entries": np.array(agent.traject_stores[0].num_entries),
                  # taking the first because this one will always exist whatever the numenv
                  "avg-tt-per-iter": avg_tt_per_iter},
                 step_metric=agent.timesteps_so_far,
