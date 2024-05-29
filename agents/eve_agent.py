@@ -640,7 +640,7 @@ class EveAgent(object):
             slices = (state[:, t, :], action[:, t, :])
             gated_sum = self.gate(*slices) * csum
             bias = self.bias(*slices)
-            loss += mask[:, t, :] * (reward[:, t, :] - gated_sum - bias).pow(2)
+            loss += 0.5 * mask[:, t, :] * (reward[:, t, :] - gated_sum - bias).pow(2)
             csum += mask[:, t, :] * self.synthetic_return(*slices)
         loss = loss.sum() / mask.sum()
 
@@ -670,7 +670,8 @@ class EveAgent(object):
         gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
         loss = mask * (reward - gated_sum - bias)
-        loss = loss.pow(2).sum() / mask.sum()
+        loss = 0.5 * loss.pow(2)
+        loss = loss.sum() / mask.sum()
 
         sre = time.time() - srs
         logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
