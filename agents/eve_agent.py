@@ -715,7 +715,7 @@ class EveAgent(object):
 
         if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             wandb_dict = {"sr_loss": sr_loss.numpy(force=True)}
-            self.send_to_dash(wandb_dict, step_metric=self.sr_updates_so_far, glob="train_disc")
+            self.send_to_dash(wandb_dict, step_metric=self.sr_updates_so_far, glob="train_sr")
 
     @beartype
     def update_disc(self, trns_batch: dict[str, torch.Tensor]):
