@@ -30,7 +30,7 @@ wd_scale: 0.
 segment_len: 2
 batch_size: 64
 gamma: 0.99
-mem_size: 250000
+rbx_capacity: 250000
 polyak: 0.005
 targ_up_freq: 100
 n_step_returns: false

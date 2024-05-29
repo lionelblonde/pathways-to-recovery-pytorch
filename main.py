@@ -174,7 +174,7 @@ class MagicRunner(object):
 
         replay_buffers = [ReplayBuffer(
             generator=torch.Generator(device).manual_seed(self._cfg.seed),
-            capacity=self._cfg.mem_size,
+            capacity=self._cfg.rbx_capacity,
             erb_shapes=erb_shapes,
             device=device,
         ) for _ in range(self._cfg.num_env)]
@@ -183,7 +183,7 @@ class MagicRunner(object):
 
         traject_stores = [TrajectStore(
             generator=torch.Generator(device).manual_seed(self._cfg.seed),
-            capacity=self._cfg.mem_size,
+            capacity=self._cfg.tsx_capacity,
             seq_t_max=max_ep_steps,
             erb_shapes=erb_shapes,
             device=device,
