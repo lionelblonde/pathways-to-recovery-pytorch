@@ -19,7 +19,8 @@ from helpers import logger
 from helpers.normalizer import RunningMoments
 from helpers.dataset import DemoDataset
 from helpers.math_util import huber_quant_reg_loss
-from agents.nets import log_module_info, Actor, TanhGaussActor, Critic, Discriminator, Base
+from agents.nets import (
+    log_module_info, Actor, TanhGaussActor, Critic, LSTMCritic, Discriminator, Base)
 from agents.ac_noise import NormalActionNoise
 from agents.memory import ReplayBuffer, TrajectStore
 
@@ -28,6 +29,7 @@ class EveAgent(object):
 
     MAGIC_FACTOR: float = 0.1
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
+    LSTM_DIM: int = 100
 
     @beartype
     def __init__(self,
@@ -131,12 +133,18 @@ class EveAgent(object):
         if self.hps.prefer_td3_over_sac:
             # using TD3 (SAC does not use a target actor)
             self.targ_actr = Actor(*actr_net_args, **actr_net_kwargs).to(self.device)
+            # note: could use `actr_module` equivalently, but prefer most explicit
 
         crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
         crit_net_kwargs_keys = ["layer_norm", "use_c51", "c51_num_atoms", "use_qr", "num_tau"]
         crit_net_kwargs = {k: getattr(self.hps, k) for k in crit_net_kwargs_keys}
-        self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+        if self.hps.lstm_mode:
+            crit_net_kwargs.update({"lstm_dim": self.LSTM_DIM, "lstm_len": self.hps.em_mxlen})
+            crit_module = LSTMCritic
+        else:
+            crit_module = Critic
+        self.crit = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.targ_crit = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
 
         # initilize the target nets
         if self.hps.prefer_td3_over_sac:
@@ -147,8 +155,8 @@ class EveAgent(object):
         if self.hps.clipped_double:
             # create second ("twin") critic and target critic
             # ref: TD3, https://arxiv.org/abs/1802.09477
-            self.twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-            self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+            self.twin = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
+            self.targ_twin = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
         disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
@@ -188,11 +196,11 @@ class EveAgent(object):
 
         # create the synthetic returns, bias, and gate nets
         base_net_args = [
-            (xx_shape := self.ob_shape if self.hps.xx_is_ob else (100,)),  # recurrent state shape
+            (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
             self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
         assert isinstance(xx_shape, tuple), "the shape must be a tuple"
         logger.info(f"base nets are using: {base_hid_dims=}")
-        base_net_kwargs_keys = ["layer_norm", "xx_is_ob"]
+        base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
         base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
         self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
         self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
@@ -307,28 +315,32 @@ class EveAgent(object):
     @beartype
     def compute_losses(self,
                        state: torch.Tensor,
+                       actr_state: torch.Tensor,
                        action: torch.Tensor,
                        next_state: torch.Tensor,
+                       actr_next_state: torch.Tensor,
                        next_action: torch.Tensor,
                        reward: torch.Tensor,
                        done: torch.Tensor,
-                       td_len: torch.Tensor) -> tuple[torch.Tensor,
-                                                      torch.Tensor,
-                                                      Optional[torch.Tensor],
-                                                      Optional[torch.Tensor]]:
+                       td_len: torch.Tensor,
+        ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Compute the critic and actor losses"""
 
         twin_loss = None
         loga_loss = None
 
+        # create new state vars for clarity
+        crit_state = state
+        crit_next_state = next_state
+
         if self.hps.prefer_td3_over_sac:
             # using TD3
-            action_from_actr = self.actr.act(state)
+            action_from_actr = self.actr.act(actr_state)
             log_prob = None  # quiets down the type checker
         else:
             # using SAC
-            action_from_actr = self.actr.sample(state, stop_grad=False)
-            log_prob = self.actr.logp(state, action_from_actr, self.max_ac)
+            action_from_actr = self.actr.sample(actr_state, stop_grad=False)
+            log_prob = self.actr.logp(actr_state, action_from_actr, self.max_ac)
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -347,12 +359,12 @@ class EveAgent(object):
         if self.hps.use_c51:
 
             # compute qz estimate
-            z = self.crit(state, action)  # shape: [batch_size, c51_num_atoms]
+            z = self.crit(crit_state, action)  # shape: [batch_size, c51_num_atoms]
             z = rearrange(z, "b n -> b n 1")  # equivalent to unsqueeze(-1)
             z.clamp(0.01, 0.99)
 
             # compute target qz estimate
-            z_prime = self.targ_crit(next_state, next_action)
+            z_prime = self.targ_crit(crit_next_state, next_action)
             # `z_prime` is shape [batch_size, c51_num_atoms]
             z_prime.clamp(0.01, 0.99)
 
@@ -386,18 +398,18 @@ class EveAgent(object):
             crit_loss = ce_losses.mean()
 
             # actor loss
-            actr_loss = -self.crit(state, action_from_actr)  # [batch_size, num_atoms]
+            actr_loss = -self.crit(crit_state, action_from_actr)  # [batch_size, num_atoms]
             # we matmul by the transpose of rearranged `c51_supp` of shape [1, c51_num_atoms]
             actr_loss = actr_loss.matmul(c51_supp.t())  # resulting shape: [batch_size, 1]
 
         elif self.hps.use_qr:
 
             # compute qz estimate, shape: [batch_size, num_tau]
-            z = self.crit(state, action)
+            z = self.crit(crit_state, action)
             z = rearrange(z, "b n -> b n 1")  # equivalent to unsqueeze(-1)
 
             # compute target qz estimate, shape: [batch_size, num_tau]
-            z_prime = self.targ_crit(next_state, next_action)
+            z_prime = self.targ_crit(crit_next_state, next_action)
 
             # `reward` has shape [batch_size, 1]
             # reshape rewards to be of shape [batch_size x num_tau, 1]
@@ -434,17 +446,17 @@ class EveAgent(object):
             crit_loss = crit_loss.mean()
 
             # actor loss
-            actr_loss = -self.crit(state, action_from_actr)
+            actr_loss = -self.crit(crit_state, action_from_actr)
 
         else:
 
             # compute qz estimates
-            q = self.denorm_rets(self.crit(state, action))
-            twin_q = self.denorm_rets(self.twin(state, action))
+            q = self.denorm_rets(self.crit(crit_state, action))
+            twin_q = self.denorm_rets(self.twin(crit_state, action))
 
             # compute target qz estimate and same for twin
-            q_prime = self.targ_crit(next_state, next_action)
-            twin_q_prime = self.targ_twin(next_state, next_action)
+            q_prime = self.targ_crit(crit_next_state, next_action)
+            twin_q_prime = self.targ_twin(crit_next_state, next_action)
             if self.hps.bcq_style_targ_mix:
                 # use BCQ style of target mixing: soft minimum
                 q_prime = (0.75 * torch.min(q_prime, twin_q_prime) +
@@ -457,7 +469,7 @@ class EveAgent(object):
 
             if not self.hps.prefer_td3_over_sac:  # only for SAC
                 # add the causal entropy regularization term
-                next_log_prob = self.actr.logp(next_state, next_action, self.max_ac)
+                next_log_prob = self.actr.logp(actr_next_state, next_action, self.max_ac)
                 q_prime -= self.alpha.detach() * next_log_prob
 
             # assemble the Bellman target
@@ -476,10 +488,11 @@ class EveAgent(object):
 
             # actor loss
             if self.hps.prefer_td3_over_sac:
-                actr_loss = -self.crit(state, action_from_actr)
+                actr_loss = -self.crit(crit_state, action_from_actr)
             else:
                 actr_loss = (self.alpha.detach() * log_prob) - torch.min(
-                    self.crit(state, action_from_actr), self.twin(state, action_from_actr))
+                    self.crit(crit_state, action_from_actr),
+                    self.twin(crit_state, action_from_actr))
                 if not actr_loss.mean().isfinite():
                     raise ValueError("NaNs: numerically unstable arctanh func")
 
@@ -514,7 +527,8 @@ class EveAgent(object):
 
     @beartype
     def update_actr_crit(self,
-                         trns_batch: dict[str, torch.Tensor],
+                         trxs_batch: dict[str, torch.Tensor],  # trns or trjs
+                         lstm_precomp_hstate: Optional[tuple[torch.Tensor, torch.Tensor]],
                          *,
                          update_actr: bool,
                          use_sr: bool):
@@ -522,26 +536,43 @@ class EveAgent(object):
 
         with torch.no_grad():
             # define inputs
-            if self.hps.wrap_absorb:
-                state = trns_batch["obs0_orig"]
-                action = trns_batch["acs_orig"]
-                next_state = trns_batch["obs1_orig"]
-            else:
-                state = trns_batch["obs0"]
-                action = trns_batch["acs"]
-                next_state = trns_batch["obs1"]
-            reward = trns_batch["rews"]
-            done = trns_batch["dones1"].float()
-            td_len = trns_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
+            sfx = "_orig" if self.hps.wrap_absorb else ""
+
+            state = trxs_batch[f"obs0{sfx}"]
+            if self.hps.lstm_mode:
+                state = rearrange(state, "b t d -> (b t) d")
+            # update the observation normalizer
+            self.rms_obs.update(state)
+
+            next_state = trxs_batch[f"obs1{sfx}"]
+            if self.hps.lstm_mode:
+                next_state = rearrange(next_state, "b t d -> (b t) d")
+
+            action = trxs_batch[f"acs{sfx}"]
+            reward = trxs_batch["rews"]
+            done = trxs_batch["dones1"].float()
+            td_len = trxs_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
+
+            actr_state, actr_next_state = state, next_state
+
+            if self.hps.lstm_mode:
+                assert lstm_precomp_hstate is not None
+                # write over the state and next state
+                state, next_state = lstm_precomp_hstate
+                state = rearrange(state, "b t d -> (b t) d")
+                next_state = rearrange(next_state, "b t d -> (b t) d")
+
+                action = rearrange(action, "b t d -> (b t) d")
+                reward = rearrange(reward, "b t d -> (b t) d")
+                done = rearrange(done, "b t d -> (b t) d")
+                td_len = rearrange(td_len, "b t d -> (b t) d")
+
             # compute sr while still in the no-grad context manager: no need to detach by hand
             if use_sr:
                 # compute the sr values for the (s, a) pairs
                 sr = self.synthetic_return(state, action)
                 # modify the rewards by interpolating them with the sr values
                 reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
-
-        # update the observation normalizer
-        self.rms_obs.update(state)
 
         # compute target action
         if self.hps.prefer_td3_over_sac:
@@ -550,16 +581,17 @@ class EveAgent(object):
                 n_ = action.clone().detach().normal_(0., self.hps.td3_std).to(self.device)
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
                 next_action = (
-                    self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
+                    self.targ_actr.act(actr_next_state) + n_).clamp(-self.max_ac, self.max_ac)
             else:
-                next_action = self.targ_actr.act(next_state)
+                next_action = self.targ_actr.act(actr_next_state)
         else:
             # using SAC
-            next_action = self.actr.sample(next_state, stop_grad=True)
+            next_action = self.actr.sample(actr_next_state, stop_grad=True)
 
         # compute critic and actor losses
         actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
-            state, action, next_state, next_action, reward, done, td_len)
+            state, actr_state, action, next_state, actr_next_state,
+            next_action, reward, done, td_len)
         # if `twin_loss` is None at this point, it means we are using C51 or QR
 
         if update_actr or (not self.hps.prefer_td3_over_sac):
@@ -679,16 +711,15 @@ class EveAgent(object):
         return loss
 
     @beartype
-    def update_sr(self, trjs_batch: dict[str, torch.Tensor]):
+    def update_sr(self,
+                  trjs_batch: dict[str, torch.Tensor],
+        ) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
         """Update the sr components"""
         with torch.no_grad():
             # define inputs
-            if self.hps.wrap_absorb:
-                state = trjs_batch["obs0_orig"]
-                action = trjs_batch["acs_orig"]
-            else:
-                state = trjs_batch["obs0"]
-                action = trjs_batch["acs"]
+            sfx = "_orig" if self.hps.wrap_absorb else ""
+            state = trjs_batch[f"obs0{sfx}"]
+            action = trjs_batch[f"acs{sfx}"]
             reward = trjs_batch["rews"]
             mask = reward.clone().detach()  # security detach
             mask[mask > 0.] = 1
@@ -696,6 +727,14 @@ class EveAgent(object):
             mask[mask == 0.] = 0
         logger.info(f"num of non-masked elements: {mask.sum()}")
         # note: also contains the obs1/obs1_orig key, which is only used for reward patching
+
+        if self.hps.lstm_mode:
+            istate = self.crit.init_hs(self.hps.batch_size * self.hps.num_env)
+            # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
+            length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
+            hstate, _ = self.crit.lstm_pipe(state, length, istate)
+            # replace state with hstate
+            state = hstate
 
         # compute the sr loss using full-batch ops
         sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
@@ -717,6 +756,19 @@ class EveAgent(object):
         if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             wandb_dict = {"sr_loss": sr_loss.numpy(force=True)}
             self.send_to_dash(wandb_dict, step_metric=self.sr_updates_so_far, glob="train_sr")
+
+        if self.hps.lstm_mode:
+            with torch.no_grad():
+                next_state = trjs_batch[f"obs1{sfx}"]
+            # return not only the rec version of the state but also the next state
+            istate = self.targ_crit.init_hs(self.hps.batch_size * self.hps.num_env)
+            # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
+            length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
+            hstate, _ = self.targ_crit.lstm_pipe(next_state, length, istate)
+            # replace state with hstate
+            next_state = hstate
+            return (state, next_state)
+        return None
 
     @beartype
     def update_disc(self, trns_batch: dict[str, torch.Tensor]):

@@ -6,6 +6,8 @@ import torch
 
 class RunningMoments(object):
 
+    MIN_VAR: float = 1e-2
+
     @beartype
     def __init__(self, shape: tuple[int, ...], device: torch.device):
         """Maintain running statistics across workers leveraging Chan's method"""
@@ -44,7 +46,7 @@ class RunningMoments(object):
         new_count = tot_count
         # update moments
         self.mean = new_mean
-        min_var = torch.tensor(1e-2)  # reminder: to create tensor from data: tensor not Tensor
+        min_var = torch.tensor(self.MIN_VAR)
         self.std = torch.maximum(new_var, min_var).sqrt()
         assert self.mean.device == self.device and self.std.device == self.device, "device issue"
         self.count = new_count

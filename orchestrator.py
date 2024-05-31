@@ -421,14 +421,25 @@ def learn(cfg: DictConfig,
             gts = time.time()
             for _ in range(gs := cfg.g_steps):
                 # sample a batch of transitions and trajectories
-                trns_batch = agent.sample_trns_batch()
+                trns_batch = None
+                if not cfg.lstm_mode:
+                    trns_batch = agent.sample_trns_batch()
                 trjs_batch = agent.sample_trjs_batch()
-                if (use_sr := trjs_batch is not None):
-                    agent.update_sr(trjs_batch)
-                # determine if updating the actr
-                update_actr = not bool(agent.crit_updates_so_far % cfg.actor_update_delay)
-                # update the actor and critic
-                agent.update_actr_crit(trns_batch, update_actr=update_actr, use_sr=use_sr)
+
+                lstm_precomp_hstate = None
+                if (there_is_at_least_one_trj := trjs_batch is not None):
+                    lstm_precomp_hstate = agent.update_sr(trjs_batch)
+
+                trxs_batch = trjs_batch if cfg.lstm_mode else trns_batch
+
+                if (cfg.lstm_mode and there_is_at_least_one_trj) or not cfg.lstm_mode:
+                    assert trxs_batch is not None  # to quiet down the type-checker
+                    # determine if updating the actr
+                    update_actr = not bool(agent.crit_updates_so_far % cfg.actor_update_delay)
+                    # update the actor and critic
+                    agent.update_actr_crit(trxs_batch, lstm_precomp_hstate,
+                        update_actr=update_actr, use_sr=there_is_at_least_one_trj)
+
                 # counters for actr and crit updates are incremented internally!
                 gtl.append(time.time() - gts)
                 gts = time.time()

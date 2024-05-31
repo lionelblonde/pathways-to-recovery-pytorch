@@ -64,6 +64,7 @@ class TrajectStore(object):
                  erb_shapes: dict[str, tuple[int, ...]],
                  *,
                  state_only: bool,  # state-only discriminator
+                 lstm_mode: bool,
                  device: torch.device):
         """Replay buffer impl"""
         self.rng = generator
@@ -71,12 +72,13 @@ class TrajectStore(object):
         self.em_mxlen = em_mxlen
         self.erb_shapes = erb_shapes
         self.state_only = state_only
-        # remove unused key to save on memory
-        self.erb_shapes.pop("dones1", None)
+        # remove unused key to save on memory  TODO(lionel): clean this up
+        if not lstm_mode:
+            self.erb_shapes.pop("dones1", None)
         if self.state_only:
             self.erb_shapes.pop("acs", None)
             self.erb_shapes.pop("acs_orig", None)
-        else:
+        elif not lstm_mode:
             self.erb_shapes.pop("obs1", None)
             self.erb_shapes.pop("obs1_orig", None)
 
