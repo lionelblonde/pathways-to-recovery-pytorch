@@ -540,13 +540,15 @@ class EveAgent(object):
 
             state = trxs_batch[f"obs0{sfx}"]
             if self.hps.lstm_mode:
-                state = rearrange(state, "b t d -> (b t) d")
+                state = rearrange(state,
+                    "b t d -> (b t) d")
             # update the observation normalizer
             self.rms_obs.update(state)
 
             next_state = trxs_batch[f"obs1{sfx}"]
             if self.hps.lstm_mode:
-                next_state = rearrange(next_state, "b t d -> (b t) d")
+                next_state = rearrange(next_state,
+                    "b t d -> (b t) d")
 
             action = trxs_batch[f"acs{sfx}"]
             reward = trxs_batch["rews"]
@@ -559,13 +561,19 @@ class EveAgent(object):
                 assert lstm_precomp_hstate is not None
                 # write over the state and next state
                 state, next_state = lstm_precomp_hstate
-                state = rearrange(state, "b t d -> (b t) d")
-                next_state = rearrange(next_state, "b t d -> (b t) d")
+                state = rearrange(state,
+                    "b t d -> (b t) d")
+                next_state = rearrange(next_state,
+                    "b t d -> (b t) d")
 
-                action = rearrange(action, "b t d -> (b t) d")
-                reward = rearrange(reward, "b t d -> (b t) d")
-                done = rearrange(done, "b t d -> (b t) d")
-                td_len = rearrange(td_len, "b t d -> (b t) d")
+                action = rearrange(action,
+                    "b t d -> (b t) d")
+                reward = rearrange(reward,
+                    "b t d -> (b t) d")
+                done = rearrange(done,
+                    "b t d -> (b t) d")
+                td_len = rearrange(td_len,
+                    "b t d -> (b t) d")
 
             # compute sr while still in the no-grad context manager: no need to detach by hand
             if use_sr:
