@@ -81,7 +81,7 @@ d_batch_norm: false
 
 # pathways to recovery
 tsx_capacity: 500
-em_mxlen: 300
-lstm_mode: true
+em_mxlen: 1000
+lstm_mode: false
 sr_alpha: 0.3 
 sr_beta: 1.
