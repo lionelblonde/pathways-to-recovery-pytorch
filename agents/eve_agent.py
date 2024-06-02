@@ -674,7 +674,7 @@ class EveAgent(object):
                                      reward: torch.Tensor,
                                      mask: torch.Tensor) -> torch.Tensor:
         """Compute sr loss batchwise along 2D and sequentially along 1D (bench only)"""
-        srs = time.time()
+        # srs = time.time()
 
         effective_batch_size, seq_t_max, _ = state.size()
         loss = torch.zeros((effective_batch_size, 1)).to(self.device)
@@ -687,7 +687,7 @@ class EveAgent(object):
             csum += mask[:, t, :] * self.synthetic_return(*slices)
         loss = loss.sum() / mask.sum()
 
-        sre = time.time() - srs
+        # sre = time.time() - srs
         logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
         # note: leaving the time logging inside the function for benchmarking
         return loss
@@ -699,7 +699,7 @@ class EveAgent(object):
                                      reward: torch.Tensor,
                                      mask: torch.Tensor) -> torch.Tensor:
         """Compute sr loss batchwise in 3D"""
-        srs = time.time()
+        # srs = time.time()
 
         _, seq_t_max, _ = state.size()
         state = rearrange(state,
@@ -716,7 +716,7 @@ class EveAgent(object):
         loss = 0.5 * loss.pow(2)
         loss = loss.sum() / mask.sum()
 
-        sre = time.time() - srs
+        # sre = time.time() - srs
         logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
         # note: leaving the time logging inside the function for benchmarking
         return loss
@@ -756,7 +756,7 @@ class EveAgent(object):
             # compute the sr loss using full-batch ops
             sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
 
-            srs = time.time()
+            # srs = time.time()
             # update parameters
             self.synthetic_return_opt.zero_grad()
             self.bias_opt.zero_grad()
@@ -765,7 +765,7 @@ class EveAgent(object):
             self.synthetic_return_opt.step()
             self.bias_opt.step()
             self.gate_opt.step()
-            sre = time.time() - srs
+            # sre = time.time() - srs
             logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
 
             self.sr_updates_so_far += 1

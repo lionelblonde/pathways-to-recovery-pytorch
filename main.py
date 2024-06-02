@@ -1,7 +1,8 @@
 import os
+import time
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from beartype import beartype
 import fire
@@ -199,7 +200,8 @@ class MagicRunner(object):
             for i, ts in enumerate(traject_stores):
                 logger.info(f"ts#{i} [{ts}] is set")
 
-        def agent_wrapper():
+        @beartype
+        def agent_wrapper() -> EveAgent:
             return EveAgent(
                 net_shapes=net_shapes,
                 max_ac=max_ac,
@@ -210,6 +212,15 @@ class MagicRunner(object):
                 replay_buffers=replay_buffers,
                 traject_stores=traject_stores,
             )
+
+        @beartype
+        def timer_wrapper() -> Callable[[], float]:
+            def _timer() -> float:
+                if self._cfg.cuda:
+                    logger.warn("cuda syncing clocks")
+                    torch.cuda.synchronize()
+                return time.time()
+            return _timer
 
         # create an evaluation environment not to mess up with training rollouts
         eval_env, _, _, _, _ = make_env(
@@ -227,6 +238,7 @@ class MagicRunner(object):
             env=env,
             eval_env=eval_env,
             agent_wrapper=agent_wrapper,
+            timer_wrapper=timer_wrapper,
             name=name,
         )
 
@@ -269,8 +281,8 @@ class MagicRunner(object):
         )
         assert isinstance(env, Env), "no vecenv allowed here"
 
-        # create an agent wrapper
-        def agent_wrapper():
+        @beartype
+        def agent_wrapper() -> EveAgent:
             return EveAgent(
                 net_shapes=net_shapes,
                 max_ac=max_ac,

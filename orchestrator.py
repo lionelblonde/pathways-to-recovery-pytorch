@@ -2,8 +2,9 @@ import time
 from copy import deepcopy
 from pathlib import Path
 from functools import partial
-from typing import Union, Callable
+from typing import Union, Callable, ContextManager
 from collections import deque
+from contextlib import contextmanager, nullcontext
 
 from beartype import beartype
 from omegaconf import OmegaConf, DictConfig
@@ -19,12 +20,33 @@ from gymnasium.experimental.vector.async_vector_env import AsyncVectorEnv
 from gymnasium.experimental.vector.sync_vector_env import SyncVectorEnv
 
 from helpers import logger
-from helpers.misc_util import log_iter_info, prettify_numb
 from helpers.opencv_util import record_video
 from agents.eve_agent import EveAgent
 
 
 DEBUG = False
+
+
+@beartype
+def prettify_numb(n: int) -> str:
+    """Display an integer number of millions, ks, etc."""
+    m, k = divmod(n, 1_000_000)
+    k, u = divmod(k, 1_000)
+    return colored(f"{m}M {k}K {u}U", "red", attrs=["reverse"])
+
+
+@beartype
+@contextmanager
+def timed(op: str, timer: Callable[[], float]):
+    logger.info(colored(
+        f"starting timer | op: {op}",
+        "magenta", attrs=["underline", "bold"]))
+    tstart = timer()
+    yield
+    tot_time = timer() - tstart
+    logger.info(colored(
+        f"stopping timer | op took {tot_time}secs",
+        "magenta"))
 
 
 @beartype
@@ -350,6 +372,7 @@ def learn(cfg: DictConfig,
           env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
           eval_env: Env,
           agent_wrapper: Callable[[], EveAgent],
+          timer_wrapper: Callable[[], Callable[[], float]],
           name: str):
 
     assert isinstance(cfg, DictConfig)
@@ -357,8 +380,13 @@ def learn(cfg: DictConfig,
     # create an agent
     agent = agent_wrapper()
 
-    # start clock
-    tstart = time.time()
+    # create a timer
+    timer = timer_wrapper()
+
+    # create context manager
+    @beartype
+    def ctx(op: str) -> ContextManager:
+        return timed(op, timer) if DEBUG else nullcontext()
 
     # set up model save directory
     ckpt_dir = Path(cfg.checkpoint_dir) / name
@@ -412,28 +440,27 @@ def learn(cfg: DictConfig,
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
-        if i % 100 == 0 or DEBUG:
-            log_iter_info(i, cfg.num_timesteps // cfg.segment_len, tstart)
+        logger.info((f"iter#{i}").upper())
 
         logger.info(("interact").upper())
-        its = time.time()
+        its = timer()
         next(roll_gen)  # no need to get the returned segment, stored in buffer
         agent.timesteps_so_far += cfg.segment_len
         logger.info(f"so far {prettify_numb(agent.timesteps_so_far)} steps made")
         logger.info(colored(
-            f"interaction time: {time.time() - its}secs",
+            f"interaction time: {timer() - its}secs",
             "green"))
 
         logger.info(("train").upper())
 
-        tts = time.time()
+        tts = timer()
         ttl = []
         gtl = []
         dtl = []
         gs, ds = 0, 0
         for _ in range(tot := cfg.training_steps_per_iter):
 
-            gts = time.time()
+            gts = timer()
             for _ in range(gs := cfg.g_steps):
                 # sample a batch of transitions and trajectories
                 trns_batch = None
@@ -445,8 +472,9 @@ def learn(cfg: DictConfig,
 
                 lstm_precomp_hstate = None
                 if (there_is_at_least_one_trj := trjs_batch is not None):
-                    lstm_precomp_hstate = agent.update_sr(
-                        trjs_batch, just_relay_hstate=cfg.lstm_mode and not cfg.enable_sr)
+                    with ctx("sr training"):
+                        lstm_precomp_hstate = agent.update_sr(
+                            trjs_batch, just_relay_hstate=cfg.lstm_mode and not cfg.enable_sr)
 
                 trxs_batch = trjs_batch if cfg.lstm_mode else trns_batch
 
@@ -454,26 +482,28 @@ def learn(cfg: DictConfig,
                     assert trxs_batch is not None  # to quiet down the type-checker
                     # determine if updating the actr
                     update_actr = not bool(agent.crit_updates_so_far % cfg.actor_update_delay)
-                    # update the actor and critic
-                    agent.update_actr_crit(trxs_batch, lstm_precomp_hstate,
-                        update_actr=update_actr, use_sr=there_is_at_least_one_trj)
+                    with ctx("actor-critic training"):
+                        # update the actor and critic
+                        agent.update_actr_crit(trxs_batch, lstm_precomp_hstate,
+                            update_actr=update_actr, use_sr=there_is_at_least_one_trj)
 
                 # counters for actr and crit updates are incremented internally!
-                gtl.append(time.time() - gts)
-                gts = time.time()
+                gtl.append(timer() - gts)
+                gts = timer()
 
-            dts = time.time()
+            dts = timer()
             for _ in range(ds := cfg.d_steps):
                 # sample a batch of transitions from the replay buffer
                 trns_batch = agent.sample_trns_batch()
-                # update the discriminator
-                agent.update_disc(trns_batch)
+                with ctx("discriminator training"):
+                    # update the discriminator
+                    agent.update_disc(trns_batch)
                 # update counter incremented internally too
-                dtl.append(time.time() - dts)
-                dts = time.time()
+                dtl.append(timer() - dts)
+                dts = timer()
 
-            ttl.append(time.time() - tts)
-            tts = time.time()
+            ttl.append(timer() - tts)
+            tts = timer()
 
         logger.info(colored(
             f"avg tt over {tot}steps: {(avg_tt_per_iter := np.mean(ttl))}secs",  # logged in eval
