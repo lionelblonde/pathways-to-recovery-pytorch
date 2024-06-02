@@ -59,7 +59,8 @@ class EveAgent(object):
         self.actr_updates_so_far = 0
         self.crit_updates_so_far = 0
         self.disc_updates_so_far = 0
-        self.sr_updates_so_far = 0
+        if self.hps.enable_sr:
+            self.sr_updates_so_far = 0
 
         assert self.hps.lookahead > 1 or not self.hps.n_step_returns
         assert self.hps.segment_len <= self.hps.batch_size
@@ -194,21 +195,22 @@ class EveAgent(object):
         )
         logger.info(f"{t_max = }")
 
-        # create the synthetic returns, bias, and gate nets
-        base_net_args = [
-            (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
-            self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
-        assert isinstance(xx_shape, tuple), "the shape must be a tuple"
-        logger.info(f"base nets are using: {base_hid_dims=}")
-        base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
-        base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
-        self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
-        self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
-        self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
-        # define their optimizers
-        self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
-        self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
-        self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
+        if self.hps.enable_sr:
+            # create the synthetic returns, bias, and gate nets
+            base_net_args = [
+                (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
+                self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
+            assert isinstance(xx_shape, tuple), "the shape must be a tuple"
+            logger.info(f"base nets are using: {base_hid_dims=}")
+            base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
+            base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
+            self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
+            # define their optimizers
+            self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
+            self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
+            self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
 
         # log module architectures
         log_module_info(self.actr)
@@ -216,9 +218,10 @@ class EveAgent(object):
         if self.hps.clipped_double:
             log_module_info(self.twin)
         log_module_info(self.disc)
-        log_module_info(self.synthetic_return)
-        log_module_info(self.bias)
-        log_module_info(self.gate)
+        if self.hps.enable_sr:
+            log_module_info(self.synthetic_return)
+            log_module_info(self.bias)
+            log_module_info(self.gate)
 
     @property
     def alpha(self):
@@ -576,7 +579,7 @@ class EveAgent(object):
                     "b t d -> (b t) d")
 
             # compute sr while still in the no-grad context manager: no need to detach by hand
-            if use_sr:
+            if self.hps.enable_sr and use_sr:
                 # compute the sr values for the (s, a) pairs
                 sr = self.synthetic_return(state, action)
                 # modify the rewards by interpolating them with the sr values
@@ -721,6 +724,8 @@ class EveAgent(object):
     @beartype
     def update_sr(self,
                   trjs_batch: dict[str, torch.Tensor],
+                  *,
+                  just_relay_hstate: bool,
         ) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
         """Update the sr components"""
         with torch.no_grad():
@@ -744,26 +749,30 @@ class EveAgent(object):
             # replace state with hstate
             state = hstate
 
-        # compute the sr loss using full-batch ops
-        sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
+        if not just_relay_hstate:
+            assert self.hps.enable_sr
+            # update sr networks
 
-        srs = time.time()
-        # update parameters
-        self.synthetic_return_opt.zero_grad()
-        self.bias_opt.zero_grad()
-        self.gate_opt.zero_grad()
-        sr_loss.backward()
-        self.synthetic_return_opt.step()
-        self.bias_opt.step()
-        self.gate_opt.step()
-        sre = time.time() - srs
-        logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
+            # compute the sr loss using full-batch ops
+            sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
 
-        self.sr_updates_so_far += 1
+            srs = time.time()
+            # update parameters
+            self.synthetic_return_opt.zero_grad()
+            self.bias_opt.zero_grad()
+            self.gate_opt.zero_grad()
+            sr_loss.backward()
+            self.synthetic_return_opt.step()
+            self.bias_opt.step()
+            self.gate_opt.step()
+            sre = time.time() - srs
+            logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
 
-        if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-            wandb_dict = {"sr_loss": sr_loss.numpy(force=True)}
-            self.send_to_dash(wandb_dict, step_metric=self.sr_updates_so_far, glob="train_sr")
+            self.sr_updates_so_far += 1
+
+            if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
+                wandb_dict = {"sr_loss": sr_loss.numpy(force=True)}
+                self.send_to_dash(wandb_dict, step_metric=self.sr_updates_so_far, glob="train_sr")
 
         if self.hps.lstm_mode:
             with torch.no_grad():

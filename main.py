@@ -181,18 +181,23 @@ class MagicRunner(object):
         for i, rb in enumerate(replay_buffers):
             logger.info(f"rb#{i} [{rb}] is set")
 
-        assert self._cfg.em_mxlen <= max_ep_steps, "episodic memory contains at most one episode"
-        traject_stores = [TrajectStore(
-            generator=torch.Generator(device).manual_seed(self._cfg.seed),
-            capacity=self._cfg.tsx_capacity,
-            em_mxlen=self._cfg.em_mxlen,
-            erb_shapes=erb_shapes,
-            state_only=self._cfg.state_only,
-            lstm_mode=self._cfg.lstm_mode,
-            device=device,
-        ) for _ in range(self._cfg.num_env)]
-        for i, ts in enumerate(traject_stores):
-            logger.info(f"ts#{i} [{ts}] is set")
+        traject_stores = None  # quiets down the type-checker
+        if self._cfg.lstm_mode or self._cfg.enable_sr:
+            em_mxlen = self._cfg.em_mxlen
+            if em_mxlen > max_ep_steps:
+                logger.warn("episodic memory size too big: overriding it to max val")
+                em_mxlen = max_ep_steps
+            traject_stores = [TrajectStore(
+                generator=torch.Generator(device).manual_seed(self._cfg.seed),
+                capacity=self._cfg.tsx_capacity,
+                em_mxlen=em_mxlen,
+                erb_shapes=erb_shapes,
+                state_only=self._cfg.state_only,
+                lstm_mode=self._cfg.lstm_mode,
+                device=device,
+            ) for _ in range(self._cfg.num_env)]
+            for i, ts in enumerate(traject_stores):
+                logger.info(f"ts#{i} [{ts}] is set")
 
         def agent_wrapper():
             return EveAgent(

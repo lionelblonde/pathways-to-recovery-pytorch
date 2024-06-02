@@ -33,20 +33,25 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
             seed: int,
             segment_len: int,
             *,
-            wrap_absorb: bool):
+            wrap_absorb: bool,
+            lstm_mode: bool,
+            enable_sr: bool):
 
     assert isinstance(env.action_space, gym.spaces.Box)  # to ensure `high` and `low` exist
     ac_low, ac_high = env.action_space.low, env.action_space.high
 
-    assert agent.replay_buffers is not None
-    assert agent.traject_stores is not None
-
     t = 0
 
-    ongoing_trajs = [deque([], maxlen=(length := agent.traject_stores[0].em_mxlen))
-        for _ in range(env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)) else 1)]
-    # as usual, index 0 chosen because it always exists whether vecencs are used or not
-    logger.warn(f"the ongoing trajects are stored in deques of {length=}")
+    assert agent.replay_buffers is not None
+    ongoing_trajs, length = None, None  # quiets down the type-checker
+    if lstm_mode or enable_sr:
+        assert agent.traject_stores is not None
+        ongoing_trajs = [
+            deque([], maxlen=(length := agent.traject_stores[0].em_mxlen))
+            for _ in range(env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv))
+            else 1)]
+        # as usual, index 0 chosen because it always exists whether vecencs are used or not
+        logger.warn(f"the ongoing trajects are stored in deques of {length=}")
 
     ob, _ = env.reset(seed=seed)  # seed is a keyword argument, not positional
 
@@ -97,24 +102,32 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
             for j, out in enumerate(outs):  # iterate over transitions
                 # add transition to the i-th replay buffer
                 pp_out = agent.replay_buffers[i].append(out, rew_func=agent.get_syn_rew)
-                # add transition to the currently ongoing trajectory in the i-th env
-                ongoing_trajs[i].append(pp_out)
 
-                if bool(pp_out["dones1"]) and (j + 1) == len(outs):
-                    # second condition: if absorbing, there are two dones in a row -> stop at last
+                if lstm_mode or enable_sr:
+                    # add transition to the currently ongoing trajectory in the i-th env
+                    assert ongoing_trajs is not None
+                    ongoing_trajs[i].append(pp_out)
 
-                    # the env time limit set by TimeLimit wrapper was once not respected
-                    # and all reproducibility effort did not conclude with an conclusive answer
-                    # TODO(lionel): find out why this is happening (Gymnasium bug?)
+                    if bool(pp_out["dones1"]) and (j + 1) == len(outs):
+                        # second cond: if absorbing, there are two dones in a row -> stop at last
 
-                    # since end of the trajectory, add the trajectory to the i-th trajectory store
-                    agent.traject_stores[i].append(list(ongoing_trajs[i]))
-                    # reset the ongoing_trajs to an empty one
-                    ongoing_trajs[i] = deque([], maxlen=length)
+                        # the env time limit set by TimeLimit wrapper was once not respected
+                        # and all reproducibility effort did not conclude with an conclusive answer
+                        # TODO(lionel): find out why this is happening (Gymnasium bug?)
+
+                        # since end of the trajectory, add the trajectory to the i-th traject store
+                        assert agent.traject_stores is not None  # quiets down the type-checker
+                        agent.traject_stores[i].append(list(ongoing_trajs[i]))
+                        # reset the ongoing_trajs to an empty one
+                        ongoing_trajs[i] = deque([], maxlen=length)
 
                 # log how filled the i-th replay buffer and i-th trajectory store are
-                logger.info(f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
-                logger.info(f"ts#{i} (#entries)/capacity: {agent.traject_stores[i].how_filled}")
+                logger.info(
+                    f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
+                if lstm_mode or enable_sr:
+                    assert agent.traject_stores is not None  # quiets down the type-checker
+                    logger.info(
+                        f"ts#{i} (#entries)/capacity: {agent.traject_stores[i].how_filled}")
 
         # set current state with the next
         ob = deepcopy(new_ob)
@@ -388,7 +401,9 @@ def learn(cfg: DictConfig,
         wandb.define_metric(f"{glob}/*", step_metric=f"{glob}/step")
 
     # create segment generator for training the agent
-    roll_gen = segment(env, agent, cfg.seed, cfg.segment_len, wrap_absorb=cfg.wrap_absorb)
+    roll_gen = segment(
+        env, agent, cfg.seed, cfg.segment_len,
+        wrap_absorb=cfg.wrap_absorb, lstm_mode=cfg.lstm_mode, enable_sr=cfg.enable_sr)
     # create episode generator for evaluating the agent
     eval_seed = cfg.seed + 123456  # arbitrary choice
     ep_gen = episode(eval_env, agent, eval_seed)
@@ -424,11 +439,14 @@ def learn(cfg: DictConfig,
                 trns_batch = None
                 if not cfg.lstm_mode:
                     trns_batch = agent.sample_trns_batch()
-                trjs_batch = agent.sample_trjs_batch()
+                trjs_batch = None
+                if cfg.lstm_mode or cfg.enable_sr:
+                    trjs_batch = agent.sample_trjs_batch()
 
                 lstm_precomp_hstate = None
                 if (there_is_at_least_one_trj := trjs_batch is not None):
-                    lstm_precomp_hstate = agent.update_sr(trjs_batch)
+                    lstm_precomp_hstate = agent.update_sr(
+                        trjs_batch, just_relay_hstate=cfg.lstm_mode and not cfg.enable_sr)
 
                 trxs_batch = trjs_batch if cfg.lstm_mode else trns_batch
 
@@ -505,13 +523,17 @@ def learn(cfg: DictConfig,
 
             # log stats in dashboard
             assert agent.replay_buffers is not None
-            assert agent.traject_stores is not None
+            wandb_dict = {
+                **{f"{k}-mean": v.mean() for k, v in eval_metrics.items()},
+                "rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
+                # taking the first because this one will always exist whatever the numenv
+                "avg-tt-per-iter": avg_tt_per_iter}
+            if cfg.lstm_mode or cfg.enable_sr:
+                assert agent.traject_stores is not None
+                wandb_dict.update({
+                    "tsx-num-entries": np.array(agent.traject_stores[0].num_entries)})
             agent.send_to_dash(
-                {**{f"{k}-mean": v.mean() for k, v in eval_metrics.items()},
-                 "rbx-num-entries": np.array(agent.replay_buffers[0].num_entries),
-                 "tsx-num-entries": np.array(agent.traject_stores[0].num_entries),
-                 # taking the first because this one will always exist whatever the numenv
-                 "avg-tt-per-iter": avg_tt_per_iter},
+                wandb_dict,
                 step_metric=agent.timesteps_so_far,
                 glob="eval",
             )
