@@ -730,7 +730,6 @@ class EveAgent(object):
             # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
             length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
             hstate, _ = self.crit.lstm_pipe(state, length, istate)
-            # replace state with hstate
             state = hstate
 
         if not just_relay_hstate:
@@ -738,7 +737,8 @@ class EveAgent(object):
             # update sr networks
 
             # compute the sr loss using full-batch ops
-            sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
+            sr_loss = self.compute_sr_loss_batch3dseq0d(
+                state.clone().detach(), action, reward, mask)
 
             self.synthetic_return_opt.zero_grad()
             self.bias_opt.zero_grad()
@@ -762,7 +762,6 @@ class EveAgent(object):
             # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
             length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
             hstate, _ = self.targ_crit.lstm_pipe(next_state, length, istate)
-            # replace state with hstate
             next_state = hstate
             return (state, next_state)
         return None
