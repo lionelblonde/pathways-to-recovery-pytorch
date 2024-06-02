@@ -23,14 +23,14 @@ layer_norm: true
 # optimization
 actor_lr: 2.5e-4
 critic_lr: 2.5e-4
-clip_norm: 50.
+clip_norm: 40.
 wd_scale: 0.
 
 # algorithm
 segment_len: 2
 batch_size: 64
 gamma: 0.99
-rbx_capacity: 250000
+rbx_capacity: 400000
 polyak: 0.005
 targ_up_freq: 100
 n_step_returns: false
