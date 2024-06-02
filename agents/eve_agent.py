@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 from typing import Optional, Union
 from collections import defaultdict
@@ -6,7 +5,6 @@ from collections import defaultdict
 from beartype import beartype
 from omegaconf import DictConfig
 from einops import repeat, rearrange, pack
-from termcolor import colored
 import wandb
 import numpy as np
 import torch
@@ -674,8 +672,6 @@ class EveAgent(object):
                                      reward: torch.Tensor,
                                      mask: torch.Tensor) -> torch.Tensor:
         """Compute sr loss batchwise along 2D and sequentially along 1D (bench only)"""
-        # srs = time.time()
-
         effective_batch_size, seq_t_max, _ = state.size()
         loss = torch.zeros((effective_batch_size, 1)).to(self.device)
         csum = torch.zeros((effective_batch_size, 1)).to(self.device)
@@ -685,12 +681,7 @@ class EveAgent(object):
             bias = self.bias(*slices)
             loss += 0.5 * mask[:, t, :] * (reward[:, t, :] - gated_sum - bias).pow(2)
             csum += mask[:, t, :] * self.synthetic_return(*slices)
-        loss = loss.sum() / mask.sum()
-
-        # sre = time.time() - srs
-        logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
-        # note: leaving the time logging inside the function for benchmarking
-        return loss
+        return loss.sum() / mask.sum()
 
     @beartype
     def compute_sr_loss_batch3dseq0d(self,
@@ -699,8 +690,6 @@ class EveAgent(object):
                                      reward: torch.Tensor,
                                      mask: torch.Tensor) -> torch.Tensor:
         """Compute sr loss batchwise in 3D"""
-        # srs = time.time()
-
         _, seq_t_max, _ = state.size()
         state = rearrange(state,
             "b t d -> (b t) d")
@@ -714,12 +703,7 @@ class EveAgent(object):
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
         loss = mask * (reward - gated_sum - bias)
         loss = 0.5 * loss.pow(2)
-        loss = loss.sum() / mask.sum()
-
-        # sre = time.time() - srs
-        logger.info(colored(f"computing the sr loss took {sre}secs", "magenta"))
-        # note: leaving the time logging inside the function for benchmarking
-        return loss
+        return loss.sum() / mask.sum()
 
     @beartype
     def update_sr(self,
@@ -756,8 +740,6 @@ class EveAgent(object):
             # compute the sr loss using full-batch ops
             sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
 
-            # srs = time.time()
-            # update parameters
             self.synthetic_return_opt.zero_grad()
             self.bias_opt.zero_grad()
             self.gate_opt.zero_grad()
@@ -765,8 +747,6 @@ class EveAgent(object):
             self.synthetic_return_opt.step()
             self.bias_opt.step()
             self.gate_opt.step()
-            # sre = time.time() - srs
-            logger.info(colored(f"backward path through sr loss took {sre}secs", "magenta"))
 
             self.sr_updates_so_far += 1
 
