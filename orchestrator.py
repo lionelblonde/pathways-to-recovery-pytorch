@@ -440,7 +440,7 @@ def learn(cfg: DictConfig,
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
-        logger.warn((f"iter#{i}").upper())
+        logger.info((f"iter#{i}").upper())
 
         logger.info(("interact").upper())
         its = timer()

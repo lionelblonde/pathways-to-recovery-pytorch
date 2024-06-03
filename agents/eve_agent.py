@@ -105,7 +105,7 @@ class EveAgent(object):
                 sigma=float(self.hps.normal_noise_std) * torch.ones(self.ac_shape).to(self.device),
                 generator=actr_noise_rng,
             )  # spherical/isotropic additive Normal(0., 0.1) action noise (we set the std via cfg)
-            logger.info(f"{self.ac_noise} configured")
+            logger.debug(f"{self.ac_noise} configured")
 
         # create observation normalizer that maintains running statistics
         self.rms_obs = RunningMoments(shape=self.ob_shape, device=self.device)
@@ -160,7 +160,7 @@ class EveAgent(object):
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
         disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
-        logger.info(f"discriminator net is using: {disc_hid_dims=}")
+        logger.debug(f"discriminator net is using: {disc_hid_dims=}")
         disc_net_kwargs_keys = ["wrap_absorb", "d_batch_norm", "spectral_norm", "state_only"]
         disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
         self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
@@ -297,14 +297,12 @@ class EveAgent(object):
                 # apply additive action noise once the action has been predicted,
                 # in combination with parameter noise, or not.
                 ac_tensor += self.ac_noise.generate()
-                logger.info("applied noise")
         else:
             # using SAC
             assert not self.hps.prefer_td3_over_sac
             if apply_noise:
                 ac_tensor = self.actr.sample(
                     ob_tensor, stop_grad=True)
-                logger.info("applied noise")
             else:
                 ac_tensor = self.actr.mode(
                     ob_tensor, stop_grad=True)
@@ -525,7 +523,7 @@ class EveAgent(object):
         wandb_dict[f"{glob}/step"] = step_metric
 
         wandb.log(wandb_dict)
-        logger.info(f"logged this to wandb: {wandb_dict}")
+        logger.debug(f"logged this to wandb: {wandb_dict}")
 
     @beartype
     def update_actr_crit(self,
@@ -723,7 +721,7 @@ class EveAgent(object):
             mask[mask > 0.] = 1
             mask[mask < 0.] = 1
             mask[mask == 0.] = 0
-        logger.info(f"num of non-masked elements: {mask.sum()}")
+        logger.debug(f"num of non-masked elements: {mask.sum()}")
         # note: also contains the obs1/obs1_orig key, which is only used for reward patching
 
         if self.hps.lstm_mode:
@@ -826,7 +824,7 @@ class EveAgent(object):
         # apply label smoothing to real labels (one-sided label smoothing)
         if (offset := self.hps.d_label_smooth) != 0:
             real_labels.uniform_(1. - offset, 1. + offset)
-            logger.info("applied one-sided label smoothing")
+            logger.debug("applied one-sided label smoothing")
 
         # binary classification
         p_loss = ff.binary_cross_entropy_with_logits(

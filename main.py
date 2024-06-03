@@ -56,7 +56,7 @@ def get_name(uuid: str, env_id: str, seed: int) -> str:
 class MagicRunner(object):
 
     DISABLE_LOGGER: bool = False
-    LOGGER_LEVEL: int = logger.WARN
+    LOGGER_LEVEL: int = logger.INFO
 
     @beartype
     def __init__(self, cfg: str,  # give the relative path to cfg here
@@ -219,7 +219,7 @@ class MagicRunner(object):
         def timer_wrapper() -> Callable[[], float]:
             def _timer() -> float:
                 if self._cfg.cuda:
-                    logger.warn("cuda syncing clocks")
+                    logger.debug("cuda syncing clocks")
                     torch.cuda.synchronize()
                 return time.time()
             return _timer
