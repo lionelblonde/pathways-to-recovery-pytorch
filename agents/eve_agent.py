@@ -703,7 +703,8 @@ class EveAgent(object):
         bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
         gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
         self.send_to_dash({
-            "gate": gate.mean().numpy(force=True),
+            "gate-mean": gate.mean().numpy(force=True),
+            "gate--max":  gate.max().numpy(force=True),
         }, step_metric=self.sr_updates_so_far, glob="train_sr")
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
         loss = mask * (reward - gated_sum - bias)
