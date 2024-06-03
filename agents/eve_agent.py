@@ -706,8 +706,8 @@ class EveAgent(object):
         bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
         gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
         self.send_to_dash({
-            "gate-mean": gate.mean().numpy(force=True),
-            "gate--max":  gate.max().numpy(force=True),
+            "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
+            "gate--max": (gate.sum() / mask.sum()).numpy(force=True),
         }, step_metric=self.sr_updates_so_far, glob="train_sr")
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
         loss = mask * (reward - gated_sum - bias)
@@ -730,7 +730,7 @@ class EveAgent(object):
             length = trjs_batch["len"]
             # built a mask
             _, seq_t_max, _ = state.size()
-            range_tensor = rearrange(torch.arange(seq_t_max), "t -> 1 t")
+            range_tensor = rearrange(torch.arange(seq_t_max).to(self.device), "t -> 1 t")
             mask = range_tensor < length  # length size: (batch size x num_env, 1)
             # so the resulting mask is size, by broadcasting: (batch size x num_env, seq_t_max)
             mask = rearrange(mask, "b t -> b t 1")
