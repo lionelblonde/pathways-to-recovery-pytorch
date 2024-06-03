@@ -660,8 +660,8 @@ class EveAgent(object):
             )
 
         # update target nets
-        if (self.hps.prefer_td3_over_sac or
-            self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0):
+        if (self.hps.prefer_td3_over_sac or (
+            self.crit_updates_so_far % self.hps.crit_targ_update_freq == 0)):
             self.update_target_net()
 
     @beartype
