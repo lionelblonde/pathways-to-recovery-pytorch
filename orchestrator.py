@@ -93,7 +93,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         new_ob, _, terminated, truncated, info = env.step(ac)  # reward ignored
 
         if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
-            logger.warn(f"{terminated=} | {truncated=}")
+            logger.debug(f"{terminated=} | {truncated=}")
             assert isinstance(terminated, np.ndarray)
             assert isinstance(truncated, np.ndarray)
             assert terminated.shape == truncated.shape
@@ -102,7 +102,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
             assert isinstance(env, Env)
             done, terminated = np.array([terminated or truncated]), np.array([terminated])
             if truncated:
-                logger.warn("termination caused by something like time limit or out of bounds?")
+                logger.debug("termination caused by something like time limit or out of bounds?")
         else:
             done = np.logical_or(terminated, truncated)  # might not be used but diagnostics
             done, terminated = rearrange(done, "b -> b 1"), rearrange(terminated, "b -> b 1")
@@ -144,11 +144,11 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
                         ongoing_trajs[i] = deque([], maxlen=length)
 
                 # log how filled the i-th replay buffer and i-th trajectory store are
-                logger.info(
+                logger.debug(
                     f"rb#{i} (#entries)/capacity: {agent.replay_buffers[i].how_filled}")
                 if lstm_mode or enable_sr:
                     assert agent.traject_stores is not None  # quiets down the type-checker
-                    logger.info(
+                    logger.debug(
                         f"ts#{i} (#entries)/capacity: {agent.traject_stores[i].how_filled}")
 
         # set current state with the next
@@ -179,7 +179,7 @@ def postproc_vtr(num_envs: int,
         ob, ac, _, terminated = tr
         if "final_observation" in info:
             if bool(info["_final_observation"][i]):
-                logger.warn("writing over new_ob with info[final_observation]")
+                logger.debug("writing over new_ob with info[final_observation]")
                 tr = [ob, ac, info["final_observation"][i], terminated]
         outs = postproc_tr(tr, ob_shape, ac_shape, wrap_absorb=wrap_absorb)
         vouts.extend(outs)
@@ -440,7 +440,7 @@ def learn(cfg: DictConfig,
 
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
-        logger.info((f"iter#{i}").upper())
+        logger.warn((f"iter#{i}").upper())
 
         logger.info(("interact").upper())
         its = timer()
@@ -487,7 +487,6 @@ def learn(cfg: DictConfig,
                         agent.update_actr_crit(trxs_batch, lstm_precomp_hstate,
                             update_actr=update_actr, use_sr=there_is_at_least_one_trj)
 
-                # counters for actr and crit updates are incremented internally!
                 gtl.append(timer() - gts)
                 gts = timer()
 
@@ -498,7 +497,7 @@ def learn(cfg: DictConfig,
                 with ctx("discriminator training"):
                     # update the discriminator
                     agent.update_disc(trns_batch)
-                # update counter incremented internally too
+
                 dtl.append(timer() - dts)
                 dts = timer()
 

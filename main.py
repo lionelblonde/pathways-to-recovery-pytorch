@@ -56,6 +56,7 @@ def get_name(uuid: str, env_id: str, seed: int) -> str:
 class MagicRunner(object):
 
     DISABLE_LOGGER: bool = False
+    LOGGER_LEVEL: int = logger.WARN
 
     @beartype
     def __init__(self, cfg: str,  # give the relative path to cfg here
@@ -129,6 +130,7 @@ class MagicRunner(object):
             log_path = Path(self._cfg.log_dir) / name
             log_path.mkdir(parents=True, exist_ok=True)
             logger.configure(directory=log_path, format_strs=["stdout", "log", "json", "csv"])
+            logger.set_level(self.LOGGER_LEVEL)
             # config dump
             OmegaConf.save(config=self._cfg, f=(log_path / "cfg.yml"))
 
@@ -262,6 +264,7 @@ class MagicRunner(object):
             logger.set_level(logger.DISABLED)  # turn the logging off
         else:
             logger.configure(directory=None, format_strs=["stdout"])
+            logger.set_level(self.LOGGER_LEVEL)
 
         # device
         device = torch.device("cpu")

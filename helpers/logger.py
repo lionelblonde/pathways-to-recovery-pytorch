@@ -14,7 +14,6 @@ DEBUG: int = 10
 INFO: int = 20
 WARN: int = 30
 ERROR: int = 40
-
 DISABLED: int = 50
 
 
