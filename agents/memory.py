@@ -85,10 +85,9 @@ class TrajectStore(object):
         self.pdd_shapes = {
             k: (self.em_mxlen, *s) for k, s in self.erb_shapes.items()}
         self.device = device
-        self.ring_buffers = {}
-        for k in self.pdd_shapes:
-            self.ring_buffers.update({
-                k: RingBuffer(self.capacity, self.pdd_shapes[k], self.device)})
+        self.ring_buffers = {
+            k: RingBuffer(self.capacity, self.pdd_shapes[k], self.device) for k in self.pdd_shapes}
+        self.ring_buffers.update({"len": RingBuffer(self.capacity, (1,), self.device)})
 
     @beartype
     def get_trjs(self, idxs: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -151,6 +150,8 @@ class TrajectStore(object):
     def append(self, trj: list[dict[str, torch.Tensor]]):
         new_trj = self.rearrange_and_zeropad(trj)
         assert "rews" in new_trj, "ensure transitions are always appended to the RB before the TS"
+        # also add the trajectory length (to build a mask later)
+        new_trj["len"] = torch.tensor(len(trj), device=self.device)
         # it is necessary for each transition to first be added to the RB since its append method
         # adds the reward to the reward ring buffer and then returns the augmented transition for
         # the orchestrator to append to the currently ongoing trajectory, eventually stored here.

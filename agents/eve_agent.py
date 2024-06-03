@@ -279,6 +279,9 @@ class EveAgent(object):
                 batches[k].append(v)
         out = {}
         for k, v in batches.items():
+            if k == "len":
+                out[k], _ = pack(v, "* d")
+                continue
             out[k], _ = pack(v, "* t d")  # equiv to: rearrange(v, "n b t d -> (n b) t d")
         return out
 
@@ -724,10 +727,14 @@ class EveAgent(object):
             state = trjs_batch[f"obs0{sfx}"]
             action = trjs_batch[f"acs{sfx}"]
             reward = trjs_batch["rews"]
-            mask = reward.clone().detach()  # security detach
-            mask[mask > 0.] = 1
-            mask[mask < 0.] = 1
-            mask[mask == 0.] = 0
+            length = trjs_batch["len"]
+            # built a mask
+            _, seq_t_max, _ = state.size()
+            range_tensor = rearrange(torch.arange(seq_t_max), "t -> 1 t")
+            mask = range_tensor < length  # length size: (batch size x num_env, 1)
+            # so the resulting mask is size, by broadcasting: (batch size x num_env, seq_t_max)
+            mask = rearrange(mask, "b t -> b t 1")
+            mask = mask.float()
         logger.debug(f"num of non-masked elements: {mask.sum()}")
         # note: also contains the obs1/obs1_orig key, which is only used for reward patching
 
