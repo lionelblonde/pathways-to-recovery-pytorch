@@ -670,7 +670,10 @@ class EveAgent(object):
                                      action: torch.Tensor,
                                      reward: torch.Tensor,
                                      mask: torch.Tensor) -> torch.Tensor:
-        """Compute sr loss batchwise along 2D and sequentially along 1D (bench only)"""
+        """Compute sr loss batchwise along 2D and sequentially along 1D.
+        This is only here for benchmark purposes, and is considerably slower
+        that the batchwise 3D version of the loss, as expected.
+        """
         effective_batch_size, seq_t_max, _ = state.size()
         loss = torch.zeros((effective_batch_size, 1)).to(self.device)
         csum = torch.zeros((effective_batch_size, 1)).to(self.device)
@@ -699,6 +702,9 @@ class EveAgent(object):
             "(b t) d -> b t d", t=seq_t_max)
         bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
         gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        self.send_to_dash({
+            "gate": gate.mean().numpy(force=True),
+        }, step_metric=self.sr_updates_so_far, glob="train_sr")
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
         loss = mask * (reward - gated_sum - bias)
         loss = 0.5 * loss.pow(2)
