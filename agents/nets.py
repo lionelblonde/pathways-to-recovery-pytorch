@@ -512,6 +512,7 @@ class Base(nn.Module):
                  *,
                  lstm_mode: bool,
                  layer_norm: bool,
+                 state_only: bool,
                  sigmoid_o: bool = False):
         super().__init__()
         xx_dim = xx_shape[-1]
@@ -519,12 +520,17 @@ class Base(nn.Module):
         self.rms_obs = rms_obs
         self.lstm_mode = lstm_mode
         self.layer_norm = layer_norm
+        self.state_only = state_only
         self.sigmoid_o = sigmoid_o
+
+        in_dim = xx_dim
+        if not self.state_only:
+            in_dim += ac_dim
 
         # assemble the last layers and output heads
         self.fc_stack = nn.Sequential(OrderedDict([
             ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(xx_dim + ac_dim, hid_dims[0])),
+                ("fc", nn.Linear(in_dim, hid_dims[0])),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
                 ("nl", nn.ReLU()),
             ]))),
@@ -544,7 +550,10 @@ class Base(nn.Module):
     def forward(self, xx: torch.Tensor, ac: torch.Tensor) -> torch.Tensor:
         if not self.lstm_mode:
             xx = self.rms_obs.standardize(xx).clamp(*STANDARDIZED_OB_CLAMPS)
-        x, _ = pack([xx, ac], "b *")
+        if self.state_only:
+            x = xx
+        else:
+            x, _ = pack([xx, ac], "b *")
         x = self.fc_stack(x)
         x = self.head(x)
         if self.sigmoid_o:

@@ -203,8 +203,11 @@ class EveAgent(object):
             logger.info(f"base nets are using: {base_hid_dims=}")
             base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
             base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
+            base_net_kwargs["state_only"] = True  # add key and value
             self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            base_net_kwargs["state_only"] = self.hps.state_only_bias  # override value
             self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            base_net_kwargs["state_only"] = self.hps.state_only_gate  # override value
             self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
             # define their optimizers
             self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)

@@ -86,3 +86,5 @@ em_mxlen: 1000
 lstm_mode: false
 sr_alpha: 0.3 
 sr_beta: 1.
+state_only_bias: false
+state_only_gate: false
