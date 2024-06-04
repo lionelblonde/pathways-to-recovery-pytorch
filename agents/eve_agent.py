@@ -1017,6 +1017,15 @@ class EveAgent(object):
                 "twin": self.twin.state_dict(),
                 "twin_opt": self.twin_opt.state_dict(),
             })
+        if self.hps.enable_sr:
+            checkpoint.update({
+                "synthetic_return": self.synthetic_return.state_dict(),
+                "bias": self.bias.state_dict(),
+                "gate": self.gate.state_dict(),
+                "synthetic_return_opt": self.synthetic_return_opt.state_dict(),
+                "bias_opt": self.bias_opt.state_dict(),
+                "gate_opt": self.gate_opt.state_dict(),
+            })
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
 
@@ -1047,3 +1056,10 @@ class EveAgent(object):
                 raise IOError("no twin found in checkpoint tar file")
         elif "twin" in checkpoint:  # in the case where clipped double is off
             logger.warn("there is a twin the loaded tar, but you want none")
+        if self.hps.enable_sr:
+            self.synthetic_return.load_state_dict(checkpoint["synthetic_return"])
+            self.bias.load_state_dict(checkpoint["bias"])
+            self.gate.load_state_dict(checkpoint["gate"])
+            self.synthetic_return_opt.load_state_dict(checkpoint["synthetic_return_opt"])
+            self.bias_opt.load_state_dict(checkpoint["bias_opt"])
+            self.gate_opt.load_state_dict(checkpoint["gate_opt"])
