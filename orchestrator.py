@@ -70,8 +70,8 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         assert agent.traject_stores is not None
         ongoing_trajs = [
             deque([], maxlen=(length := agent.traject_stores[0].em_mxlen))
-            for _ in range(env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv))
-            else 1)]
+            for _ in range(
+                env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)) else 1)]
         # as usual, index 0 chosen because it always exists whether vecencs are used or not
         logger.warn(f"the ongoing trajects are stored in deques of {length=}")
 
@@ -474,7 +474,7 @@ def learn(cfg: DictConfig,
                 if (there_is_at_least_one_trj := trjs_batch is not None):
                     with ctx("sr training"):
                         lstm_precomp_hstate = agent.update_sr(
-                            trjs_batch, just_relay_hstate=cfg.lstm_mode and not cfg.enable_sr)
+                            trjs_batch, just_relay_hstate=(cfg.lstm_mode and not cfg.enable_sr))
 
                 trxs_batch = trjs_batch if cfg.lstm_mode else trns_batch
 
