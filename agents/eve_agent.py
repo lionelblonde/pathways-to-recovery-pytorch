@@ -28,6 +28,7 @@ class EveAgent(object):
     MAGIC_FACTOR: float = 0.1
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
     LSTM_DIM: int = 100
+    AMORTIZED_INFERENCE_REPEATS: int = 500
 
     @beartype
     def __init__(self,
@@ -580,9 +581,13 @@ class EveAgent(object):
             # compute sr while still in the no-grad context manager: no need to detach by hand
             if self.hps.enable_sr and use_sr:
                 # compute the sr values for the (s, a) pairs
-                sr = self.synthetic_return(state, action)
+                synthetic_return = self.synthetic_return(state, action)
+                value_equivalent = repeat(synthetic_return,
+                    "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS).clone().detach().uniform_(
+                        -self.max_ac, self.max_ac).mean(dim=0)
+                synthetic_advantage = synthetic_return - value_equivalent
                 # modify the rewards by interpolating them with the sr values
-                reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
+                reward = (self.hps.sr_alpha * synthetic_advantage) + (self.hps.sr_beta * reward)
 
         # compute target action
         if self.hps.prefer_td3_over_sac:
