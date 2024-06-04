@@ -57,6 +57,7 @@ class MagicRunner(object):
 
     DISABLE_LOGGER: bool = False
     LOGGER_LEVEL: int = logger.INFO
+    PRODUCTION_MODE: bool = True
 
     @beartype
     def __init__(self, cfg: str,  # give the relative path to cfg here
@@ -218,7 +219,7 @@ class MagicRunner(object):
         @beartype
         def timer_wrapper() -> Callable[[], float]:
             def _timer() -> float:
-                if self._cfg.cuda:
+                if self._cfg.cuda and not self.PRODUCTION_MODE:
                     logger.debug("cuda syncing clocks")
                     torch.cuda.synchronize()
                 return time.time()
