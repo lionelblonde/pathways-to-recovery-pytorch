@@ -704,9 +704,11 @@ class EveAgent(object):
             "(b t) d -> b t d", t=seq_t_max)
         bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
         gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
-        self.send_to_dash({
-            "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
-        }, step_metric=self.sr_updates_so_far, glob="train_sr")
+        if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
+            self.send_to_dash({
+                "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
+                "mask-fill-perc": (100. * mask.sum() / mask.numel()).numpy(force=True),
+            }, step_metric=self.sr_updates_so_far, glob="train_sr")
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
         loss = mask * (reward - gated_sum - bias)
         loss = 0.5 * loss.pow(2)
@@ -762,8 +764,9 @@ class EveAgent(object):
             self.sr_updates_so_far += 1
 
             if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-                wandb_dict = {"sr_loss": sr_loss.numpy(force=True)}
-                self.send_to_dash(wandb_dict, step_metric=self.sr_updates_so_far, glob="train_sr")
+                self.send_to_dash({
+                    "sr_loss": sr_loss.numpy(force=True),
+                }, step_metric=self.sr_updates_so_far, glob="train_sr")
 
         if self.hps.lstm_mode:
             with torch.no_grad():
