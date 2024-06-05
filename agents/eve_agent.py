@@ -585,12 +585,13 @@ class EveAgent(object):
             if self.hps.enable_sr and use_sr:
                 # compute the sr values for the (s, a) pairs
                 synthetic_return = self.synthetic_return(state, action)
-                value_equivalent = repeat(synthetic_return,
-                    "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS).clone().detach().uniform_(
-                        -self.max_ac, self.max_ac).mean(dim=0)
-                synthetic_advantage = synthetic_return - value_equivalent
+                if self.hps.amortized_advantage:
+                    value_equivalent = repeat(
+                        synthetic_return, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
+                    ).clone().detach().uniform_(-self.max_ac, self.max_ac).mean(dim=0)
+                    synthetic_return = synthetic_return - value_equivalent
                 # modify the rewards by interpolating them with the sr values
-                reward = (self.hps.sr_alpha * synthetic_advantage) + (self.hps.sr_beta * reward)
+                reward = (self.hps.sr_alpha * synthetic_return) + (self.hps.sr_beta * reward)
 
         # compute target action
         if self.hps.prefer_td3_over_sac:

@@ -81,8 +81,9 @@ d_batch_norm: false
 
 # pathways to recovery
 enable_sr: true
-tsx_capacity: 1000
+tsx_capacity: 500
 em_mxlen: 1000
+amortized_advantage: false
 lstm_mode: false
 sr_alpha: 0.2 
 sr_beta: 1.

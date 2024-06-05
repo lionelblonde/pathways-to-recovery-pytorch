@@ -83,7 +83,8 @@ d_batch_norm: false
 enable_sr: true
 tsx_capacity: 500
 em_mxlen: 1000
-lstm_mode: true
+amortized_advantage: false
+lstm_mode: false
 sr_alpha: 0.2 
 sr_beta: 1.
 state_only_bias: false
