@@ -17,10 +17,10 @@ from main import make_uuid
 
 
 ENV_BUNDLES = {
-    "farama_debug": [
+    "debug": [
         "Walker2d-v4",
     ],
-    "farama_suite": [
+    "suite": [
         "Ant-v4",
         "HalfCheetah-v4",
         "Hopper-v4",
