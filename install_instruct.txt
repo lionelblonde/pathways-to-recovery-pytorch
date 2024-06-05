@@ -1,4 +1,4 @@
-pip install beartype fire omegaconf h5py pandas matplotlib seaborn numpy pyyaml lockfile imageio moviepy tmuxp opencv-python wandb torch gymnasium dm_control 
+pip install einops beartype fire omegaconf h5py pandas matplotlib seaborn numpy pyyaml lockfile imageio moviepy tmuxp opencv-python wandb torch gymnasium dm_control 
 
 # for local machine with editor needing lsp linter and type-checker:
 pip install pyright ruff-lsp python-lsp-server pycodestyle
