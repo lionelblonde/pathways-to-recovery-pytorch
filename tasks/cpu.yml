@@ -80,11 +80,11 @@ wrap_absorb: true
 d_batch_norm: false
 
 # pathways to recovery
-enable_sr: false
+enable_sr: true
 tsx_capacity: 500
 em_mxlen: 1000
-lstm_mode: false
-sr_alpha: 0.3 
+lstm_mode: true
+sr_alpha: 0.2 
 sr_beta: 1.
 state_only_bias: false
 state_only_gate: false
