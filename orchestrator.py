@@ -1,3 +1,4 @@
+import os
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -402,8 +403,9 @@ def learn(cfg: DictConfig,
 
     # group by everything except the seed, which is last, hence index -1
     # it groups by uuid + gitSHA + env_id + num_demos
-    group = ".".join(name.split(".")[:-1])
+    group = ".".join(name.split(".")[:2])
     # set up wandb
+    os.environ["WANDB__SERVICE_WAIT"] = "300"
     while True:
         try:
             config = OmegaConf.to_object(cfg)
