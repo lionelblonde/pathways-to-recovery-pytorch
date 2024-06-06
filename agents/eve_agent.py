@@ -18,7 +18,7 @@ from helpers.normalizer import RunningMoments
 from helpers.dataset import DemoDataset
 from helpers.math_util import huber_quant_reg_loss
 from agents.nets import (
-    log_module_info, Actor, TanhGaussActor, Critic, LSTMCritic, Discriminator, Base)
+    log_module_info, Actor, TanhGaussActor, Critic, Discriminator, Base)
 from agents.ac_noise import NormalActionNoise
 from agents.memory import ReplayBuffer, TrajectStore
 
@@ -27,7 +27,8 @@ class EveAgent(object):
 
     MAGIC_FACTOR: float = 0.1
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
-    LSTM_DIM: int = 100
+    OVERRIDE_ORIG_HID_DIMS: bool = True
+    LSTM_DIM: int = 256
     AMORTIZED_INFERENCE_REPEATS: int = 500
 
     @beartype
@@ -119,7 +120,11 @@ class EveAgent(object):
 
         # create online and target nets
 
-        actr_hid_dims = crit_hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
+        actr_hid_dims = (300, 200) if self.hps.prefer_td3_over_sac else (256, 256)
+        crit_hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
+        if self.OVERRIDE_ORIG_HID_DIMS:
+            # override the values
+            actr_hid_dims = crit_hid_dims = (256, 256)
 
         actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
         actr_net_kwargs = {"layer_norm": self.hps.layer_norm}
@@ -138,13 +143,8 @@ class EveAgent(object):
         crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
         crit_net_kwargs_keys = ["layer_norm", "use_c51", "c51_num_atoms", "use_qr", "num_tau"]
         crit_net_kwargs = {k: getattr(self.hps, k) for k in crit_net_kwargs_keys}
-        if self.hps.lstm_mode:
-            crit_net_kwargs.update({"lstm_dim": self.LSTM_DIM, "lstm_len": self.hps.em_mxlen})
-            crit_module = LSTMCritic
-        else:
-            crit_module = Critic
-        self.crit = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
-        self.targ_crit = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
 
         # initilize the target nets
         if self.hps.prefer_td3_over_sac:
@@ -155,8 +155,8 @@ class EveAgent(object):
         if self.hps.clipped_double:
             # create second ("twin") critic and target critic
             # ref: TD3, https://arxiv.org/abs/1802.09477
-            self.twin = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
-            self.targ_twin = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
+            self.twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+            self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
         disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
@@ -196,23 +196,19 @@ class EveAgent(object):
 
         if self.hps.enable_sr:
             # create the synthetic returns, bias, and gate nets
-            base_net_args = [
-                (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
-                self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
-            assert isinstance(xx_shape, tuple), "the shape must be a tuple"
-            logger.info(f"base nets are using: {base_hid_dims=}")
-            base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
+            base_hid_dims = (512, 512)
+            base_net_args = [self.ob_shape, self.ac_shape, base_hid_dims, self.rms_obs]
+            base_net_kwargs_keys = ["layer_norm"]
             base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
-            base_net_kwargs["state_only"] = True  # add key and value
+            base_net_kwargs["lstm_dim"] = self.LSTM_DIM
+            base_net_kwargs["lstm_len"] = self.hps.em_mxlen
             self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            base_net_kwargs["state_only"] = self.hps.state_only_bias  # override value
-            self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            base_net_kwargs["state_only"] = self.hps.state_only_gate  # override value
-            self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
+            # self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            # self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
             # define their optimizers
             self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
-            self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
-            self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
+            # self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
+            # self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
 
         # log module architectures
         log_module_info(self.actr)
@@ -222,8 +218,8 @@ class EveAgent(object):
         log_module_info(self.disc)
         if self.hps.enable_sr:
             log_module_info(self.synthetic_return)
-            log_module_info(self.bias)
-            log_module_info(self.gate)
+            # log_module_info(self.bias)
+            # log_module_info(self.gate)
 
     @property
     def alpha(self):
@@ -321,10 +317,8 @@ class EveAgent(object):
     @beartype
     def compute_losses(self,
                        state: torch.Tensor,
-                       actr_state: torch.Tensor,
                        action: torch.Tensor,
                        next_state: torch.Tensor,
-                       actr_next_state: torch.Tensor,
                        next_action: torch.Tensor,
                        reward: torch.Tensor,
                        done: torch.Tensor,
@@ -335,18 +329,14 @@ class EveAgent(object):
         twin_loss = None
         loga_loss = None
 
-        # create new state vars for clarity
-        crit_state = state
-        crit_next_state = next_state
-
         if self.hps.prefer_td3_over_sac:
             # using TD3
-            action_from_actr = self.actr.act(actr_state)
+            action_from_actr = self.actr.act(state)
             log_prob = None  # quiets down the type checker
         else:
             # using SAC
-            action_from_actr = self.actr.sample(actr_state, stop_grad=False)
-            log_prob = self.actr.logp(actr_state, action_from_actr, self.max_ac)
+            action_from_actr = self.actr.sample(state, stop_grad=False)
+            log_prob = self.actr.logp(state, action_from_actr, self.max_ac)
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -365,12 +355,12 @@ class EveAgent(object):
         if self.hps.use_c51:
 
             # compute qz estimate
-            z = self.crit(crit_state, action)  # shape: [batch_size, c51_num_atoms]
+            z = self.crit(state, action)  # shape: [batch_size, c51_num_atoms]
             z = rearrange(z, "b n -> b n 1")  # equivalent to unsqueeze(-1)
             z.clamp(0.01, 0.99)
 
             # compute target qz estimate
-            z_prime = self.targ_crit(crit_next_state, next_action)
+            z_prime = self.targ_crit(next_state, next_action)
             # `z_prime` is shape [batch_size, c51_num_atoms]
             z_prime.clamp(0.01, 0.99)
 
@@ -404,18 +394,18 @@ class EveAgent(object):
             crit_loss = ce_losses.mean()
 
             # actor loss
-            actr_loss = -self.crit(crit_state, action_from_actr)  # [batch_size, num_atoms]
+            actr_loss = -self.crit(state, action_from_actr)  # [batch_size, num_atoms]
             # we matmul by the transpose of rearranged `c51_supp` of shape [1, c51_num_atoms]
             actr_loss = actr_loss.matmul(c51_supp.t())  # resulting shape: [batch_size, 1]
 
         elif self.hps.use_qr:
 
             # compute qz estimate, shape: [batch_size, num_tau]
-            z = self.crit(crit_state, action)
+            z = self.crit(state, action)
             z = rearrange(z, "b n -> b n 1")  # equivalent to unsqueeze(-1)
 
             # compute target qz estimate, shape: [batch_size, num_tau]
-            z_prime = self.targ_crit(crit_next_state, next_action)
+            z_prime = self.targ_crit(next_state, next_action)
 
             # `reward` has shape [batch_size, 1]
             # reshape rewards to be of shape [batch_size x num_tau, 1]
@@ -452,17 +442,17 @@ class EveAgent(object):
             crit_loss = crit_loss.mean()
 
             # actor loss
-            actr_loss = -self.crit(crit_state, action_from_actr)
+            actr_loss = -self.crit(state, action_from_actr)
 
         else:
 
             # compute qz estimates
-            q = self.denorm_rets(self.crit(crit_state, action))
-            twin_q = self.denorm_rets(self.twin(crit_state, action))
+            q = self.denorm_rets(self.crit(state, action))
+            twin_q = self.denorm_rets(self.twin(state, action))
 
             # compute target qz estimate and same for twin
-            q_prime = self.targ_crit(crit_next_state, next_action)
-            twin_q_prime = self.targ_twin(crit_next_state, next_action)
+            q_prime = self.targ_crit(next_state, next_action)
+            twin_q_prime = self.targ_twin(next_state, next_action)
             if self.hps.bcq_style_targ_mix:
                 # use BCQ style of target mixing: soft minimum
                 q_prime = (0.75 * torch.min(q_prime, twin_q_prime) +
@@ -475,7 +465,7 @@ class EveAgent(object):
 
             if not self.hps.prefer_td3_over_sac:  # only for SAC
                 # add the causal entropy regularization term
-                next_log_prob = self.actr.logp(actr_next_state, next_action, self.max_ac)
+                next_log_prob = self.actr.logp(next_state, next_action, self.max_ac)
                 q_prime -= self.alpha.detach() * next_log_prob
 
             # assemble the Bellman target
@@ -494,11 +484,11 @@ class EveAgent(object):
 
             # actor loss
             if self.hps.prefer_td3_over_sac:
-                actr_loss = -self.crit(crit_state, action_from_actr)
+                actr_loss = -self.crit(state, action_from_actr)
             else:
                 actr_loss = (self.alpha.detach() * log_prob) - torch.min(
-                    self.crit(crit_state, action_from_actr),
-                    self.twin(crit_state, action_from_actr))
+                    self.crit(state, action_from_actr),
+                    self.twin(state, action_from_actr))
                 if not actr_loss.mean().isfinite():
                     raise ValueError("NaNs: numerically unstable arctanh func")
 
@@ -532,59 +522,69 @@ class EveAgent(object):
         logger.debug(f"logged this to wandb: {wandb_dict}")
 
     @beartype
+    def make_mask(self, max_len_int: int, lengths_tensor: torch.Tensor) -> torch.Tensor:
+        range_tensor = rearrange(torch.arange(max_len_int).to(self.device), "t -> 1 t")
+        mask = range_tensor < lengths_tensor  # length size: (batch size x num_env, 1)
+        # so the resulting mask is size, by broadcasting: (batch size x num_env, seq_t_max)
+        mask = rearrange(mask, "b t -> b t 1")
+        return mask.float()
+
+    @beartype
     def update_actr_crit(self,
-                         trxs_batch: dict[str, torch.Tensor],  # trns or trjs
-                         lstm_precomp_hstate: Optional[tuple[torch.Tensor, torch.Tensor]],
+                         trjs_batch: dict[str, torch.Tensor],
                          *,
-                         update_actr: bool,
-                         use_sr: bool):
+                         update_actr: bool):
         """Update the critic and the actor"""
 
         with torch.no_grad():
             # define inputs
             sfx = "_orig" if self.hps.wrap_absorb else ""
 
-            state = trxs_batch[f"obs0{sfx}"]
-            if self.hps.lstm_mode:
-                state = rearrange(state,
-                    "b t d -> (b t) d")
+            state = trjs_batch[f"obs0{sfx}"]
+            seq_t_max = None
+            if self.hps.enable_sr:
+                _, seq_t_max, _ = state.size()
+            state = rearrange(state,
+                "b t d -> (b t) d")
             # update the observation normalizer
             self.rms_obs.update(state)
 
-            next_state = trxs_batch[f"obs1{sfx}"]
-            if self.hps.lstm_mode:
-                next_state = rearrange(next_state,
-                    "b t d -> (b t) d")
+            next_state = trjs_batch[f"obs1{sfx}"]
+            next_state = rearrange(next_state,
+                "b t d -> (b t) d")
 
-            action = trxs_batch[f"acs{sfx}"]
-            reward = trxs_batch["rews"]
-            done = trxs_batch["dones1"].float()
-            td_len = trxs_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
+            action = trjs_batch[f"acs{sfx}"]
+            action = rearrange(action,
+                "b t d -> (b t) d")
 
-            actr_state, actr_next_state = state, next_state
+            reward = trjs_batch["rews"]
+            reward = rearrange(reward,
+                "b t d -> (b t) d")
 
-            if self.hps.lstm_mode:
-                assert lstm_precomp_hstate is not None
-                # write over the state and next state
-                state, next_state = lstm_precomp_hstate
-                state = rearrange(state,
-                    "b t d -> (b t) d")
-                next_state = rearrange(next_state,
-                    "b t d -> (b t) d")
+            done = trjs_batch["dones1"].float()
+            done = rearrange(done,
+                "b t d -> (b t) d")
 
-                action = rearrange(action,
-                    "b t d -> (b t) d")
-                reward = rearrange(reward,
-                    "b t d -> (b t) d")
-                done = rearrange(done,
-                    "b t d -> (b t) d")
+            if self.hps.n_step_returns:
+                td_len = trjs_batch["td_len"]
                 td_len = rearrange(td_len,
                     "b t d -> (b t) d")
+            else:
+                td_len = torch.ones_like(done)
 
             # compute sr while still in the no-grad context manager: no need to detach by hand
-            if self.hps.enable_sr and use_sr:
-                # compute the sr values for the (s, a) pairs
-                synthetic_return = self.synthetic_return(state, action)
+            if self.hps.enable_sr:
+                # create a new hidden state
+                istate = self.synthetic_return.init_hs(self.hps.batch_size * self.hps.num_env)
+                # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
+
+                # make a mask
+                assert seq_t_max is not None
+                mask = self.make_mask(seq_t_max, trjs_batch["len"])
+                length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
+
+                # compute the synthetic returns
+                synthetic_return, _ = self.synthetic_return(state, action, length, istate)
                 if self.hps.amortized_advantage:
                     value_equivalent = repeat(
                         synthetic_return, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
@@ -600,17 +600,16 @@ class EveAgent(object):
                 n_ = action.clone().detach().normal_(0., self.hps.td3_std).to(self.device)
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
                 next_action = (
-                    self.targ_actr.act(actr_next_state) + n_).clamp(-self.max_ac, self.max_ac)
+                    self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
             else:
-                next_action = self.targ_actr.act(actr_next_state)
+                next_action = self.targ_actr.act(next_state)
         else:
             # using SAC
-            next_action = self.actr.sample(actr_next_state, stop_grad=True)
+            next_action = self.actr.sample(next_state, stop_grad=True)
 
         # compute critic and actor losses
         actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
-            state, actr_state, action, next_state, actr_next_state,
-            next_action, reward, done, td_len)
+            state, action, next_state, next_action, reward, done, td_len)
         # if `twin_loss` is None at this point, it means we are using C51 or QR
 
         if update_actr or (not self.hps.prefer_td3_over_sac):
@@ -688,13 +687,19 @@ class EveAgent(object):
         action = rearrange(action,
             "b t d -> (b t) d")
         inputs = (state, action)
-        synthetic_return = rearrange(self.synthetic_return(*inputs),
+        istate = self.synthetic_return.init_hs(self.hps.batch_size * self.hps.num_env)
+        # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
+        length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
+        synthetic_return, _ = self.synthetic_return(*inputs, length, istate)
+        synthetic_return = rearrange(synthetic_return,
             "(b t) d -> b t d", t=seq_t_max)
-        bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
-        gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        # bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        bias = torch.zeros_like(synthetic_return)
+        # gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        gate = torch.ones_like(synthetic_return)
         if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             self.send_to_dash({
-                "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
+                # "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
                 "mask-fill-perc": (100. * mask.sum() / mask.numel()).numpy(force=True),
             }, step_metric=self.sr_updates_so_far, glob="train_sr")
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
@@ -703,11 +708,7 @@ class EveAgent(object):
         return loss.sum() / mask.sum()
 
     @beartype
-    def update_sr(self,
-                  trjs_batch: dict[str, torch.Tensor],
-                  *,
-                  just_relay_hstate: bool,
-        ) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+    def update_sr(self, trjs_batch: dict[str, torch.Tensor]):
         """Update the sr components"""
         with torch.no_grad():
             # define inputs
@@ -715,58 +716,29 @@ class EveAgent(object):
             state = trjs_batch[f"obs0{sfx}"]
             action = trjs_batch[f"acs{sfx}"]
             reward = trjs_batch["rews"]
-            length = trjs_batch["len"]
-            # built a mask
+            # make a mask
             _, seq_t_max, _ = state.size()
-            range_tensor = rearrange(torch.arange(seq_t_max).to(self.device), "t -> 1 t")
-            mask = range_tensor < length  # length size: (batch size x num_env, 1)
-            # so the resulting mask is size, by broadcasting: (batch size x num_env, seq_t_max)
-            mask = rearrange(mask, "b t -> b t 1")
-            mask = mask.float()
+            mask = self.make_mask(seq_t_max, trjs_batch["len"])
         logger.debug(f"num of non-masked elements: {mask.sum()}")
         # note: also contains the obs1/obs1_orig key, which is only used for reward patching
 
-        if self.hps.lstm_mode:
-            istate = self.crit.init_hs(self.hps.batch_size * self.hps.num_env)
-            # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
-            length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
-            hstate, _ = self.crit.lstm_pipe(state, length, istate)
-            state = hstate
+        # compute the sr loss using full-batch ops
+        sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
 
-        if not just_relay_hstate:
-            assert self.hps.enable_sr
-            # update sr networks
+        self.synthetic_return_opt.zero_grad()
+        # self.bias_opt.zero_grad()
+        # self.gate_opt.zero_grad()
+        sr_loss.backward()
+        self.synthetic_return_opt.step()
+        # self.bias_opt.step()
+        # self.gate_opt.step()
 
-            # compute the sr loss using full-batch ops
-            sr_loss = self.compute_sr_loss_batch3dseq0d(
-                state.clone().detach(), action, reward, mask)
+        self.sr_updates_so_far += 1
 
-            self.synthetic_return_opt.zero_grad()
-            self.bias_opt.zero_grad()
-            self.gate_opt.zero_grad()
-            sr_loss.backward()
-            self.synthetic_return_opt.step()
-            self.bias_opt.step()
-            self.gate_opt.step()
-
-            self.sr_updates_so_far += 1
-
-            if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-                self.send_to_dash({
-                    "sr_loss": sr_loss.numpy(force=True),
-                }, step_metric=self.sr_updates_so_far, glob="train_sr")
-
-        if self.hps.lstm_mode:
-            with torch.no_grad():
-                next_state = trjs_batch[f"obs1{sfx}"]
-            # return not only the rec version of the state but also the next state
-            istate = self.targ_crit.init_hs(self.hps.batch_size * self.hps.num_env)
-            # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
-            length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
-            hstate, _ = self.targ_crit.lstm_pipe(next_state, length, istate)
-            next_state = hstate
-            return (state, next_state)
-        return None
+        if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
+            self.send_to_dash({
+                "sr_loss": sr_loss.numpy(force=True),
+            }, step_metric=self.sr_updates_so_far, glob="train_sr")
 
     @beartype
     def update_disc(self, trns_batch: dict[str, torch.Tensor]):
@@ -1008,11 +980,11 @@ class EveAgent(object):
         if self.hps.enable_sr:
             checkpoint.update({
                 "synthetic_return": self.synthetic_return.state_dict(),
-                "bias": self.bias.state_dict(),
-                "gate": self.gate.state_dict(),
+                # "bias": self.bias.state_dict(),
+                # "gate": self.gate.state_dict(),
                 "synthetic_return_opt": self.synthetic_return_opt.state_dict(),
-                "bias_opt": self.bias_opt.state_dict(),
-                "gate_opt": self.gate_opt.state_dict(),
+                # "bias_opt": self.bias_opt.state_dict(),
+                # "gate_opt": self.gate_opt.state_dict(),
             })
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
@@ -1046,8 +1018,8 @@ class EveAgent(object):
             logger.warn("there is a twin the loaded tar, but you want none")
         if self.hps.enable_sr:
             self.synthetic_return.load_state_dict(checkpoint["synthetic_return"])
-            self.bias.load_state_dict(checkpoint["bias"])
-            self.gate.load_state_dict(checkpoint["gate"])
+            # self.bias.load_state_dict(checkpoint["bias"])
+            # self.gate.load_state_dict(checkpoint["gate"])
             self.synthetic_return_opt.load_state_dict(checkpoint["synthetic_return_opt"])
-            self.bias_opt.load_state_dict(checkpoint["bias_opt"])
-            self.gate_opt.load_state_dict(checkpoint["gate_opt"])
+            # self.bias_opt.load_state_dict(checkpoint["bias_opt"])
+            # self.gate_opt.load_state_dict(checkpoint["gate_opt"])
