@@ -676,27 +676,6 @@ class EveAgent(object):
             self.update_target_net()
 
     @beartype
-    def compute_sr_loss_batch2dseq1d(self,
-                                     state: torch.Tensor,
-                                     action: torch.Tensor,
-                                     reward: torch.Tensor,
-                                     mask: torch.Tensor) -> torch.Tensor:
-        """Compute sr loss batchwise along 2D and sequentially along 1D.
-        This is only here for benchmark purposes, and is considerably slower
-        that the batchwise 3D version of the loss, as expected.
-        """
-        effective_batch_size, seq_t_max, _ = state.size()
-        loss = torch.zeros((effective_batch_size, 1)).to(self.device)
-        csum = torch.zeros((effective_batch_size, 1)).to(self.device)
-        for t in range(seq_t_max):
-            slices = (state[:, t, :], action[:, t, :])
-            gated_sum = self.gate(*slices) * csum
-            bias = self.bias(*slices)
-            loss += 0.5 * mask[:, t, :] * (reward[:, t, :] - gated_sum - bias).pow(2)
-            csum += mask[:, t, :] * self.synthetic_return(*slices)
-        return loss.sum() / mask.sum()
-
-    @beartype
     def compute_sr_loss_batch3dseq0d(self,
                                      state: torch.Tensor,
                                      action: torch.Tensor,
