@@ -28,7 +28,7 @@ class EveAgent(object):
     MAGIC_FACTOR: float = 0.1
     TRAIN_METRICS_WANDB_LOG_FREQ: int = 100
     OVERRIDE_ORIG_HID_DIMS: bool = True
-    LSTM_DIM: int = 256
+    LSTM_DIM: int = 100
     AMORTIZED_INFERENCE_REPEATS: int = 500
 
     @beartype
@@ -196,19 +196,20 @@ class EveAgent(object):
 
         if self.hps.enable_sr:
             # create the synthetic returns, bias, and gate nets
-            base_hid_dims = (512, 512)
+            base_hid_dims = (100, 100)
             base_net_args = [self.ob_shape, self.ac_shape, base_hid_dims, self.rms_obs]
-            base_net_kwargs_keys = ["layer_norm"]
+            base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
             base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
-            base_net_kwargs["lstm_dim"] = self.LSTM_DIM
-            base_net_kwargs["lstm_len"] = self.hps.em_mxlen
+            if self.hps.lstm_mode:
+                base_net_kwargs["lstm_dim"] = self.LSTM_DIM
+                base_net_kwargs["lstm_len"] = self.hps.em_mxlen
             self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            # self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            # self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
+            self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
             # define their optimizers
             self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
-            # self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
-            # self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
+            self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
+            self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
 
         # log module architectures
         log_module_info(self.actr)
@@ -218,8 +219,8 @@ class EveAgent(object):
         log_module_info(self.disc)
         if self.hps.enable_sr:
             log_module_info(self.synthetic_return)
-            # log_module_info(self.bias)
-            # log_module_info(self.gate)
+            log_module_info(self.bias)
+            log_module_info(self.gate)
 
     @property
     def alpha(self):
@@ -693,13 +694,16 @@ class EveAgent(object):
         synthetic_return, _ = self.synthetic_return(*inputs, length, istate)
         synthetic_return = rearrange(synthetic_return,
             "(b t) d -> b t d", t=seq_t_max)
-        # bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
-        bias = torch.zeros_like(synthetic_return)
-        # gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
-        gate = torch.ones_like(synthetic_return)
+        istate = self.bias.init_hs(self.hps.batch_size * self.hps.num_env)
+        bias, _ = self.bias(*inputs, length, istate)
+        bias = rearrange(bias,
+            "(b t) d -> b t d", t=seq_t_max)
+        gate, _ = self.gate(*inputs, length, istate)
+        gate = rearrange(gate,
+            "(b t) d -> b t d", t=seq_t_max)
         if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             self.send_to_dash({
-                # "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
+                "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
                 "mask-fill-perc": (100. * mask.sum() / mask.numel()).numpy(force=True),
             }, step_metric=self.sr_updates_so_far, glob="train_sr")
         gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
@@ -726,12 +730,12 @@ class EveAgent(object):
         sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
 
         self.synthetic_return_opt.zero_grad()
-        # self.bias_opt.zero_grad()
-        # self.gate_opt.zero_grad()
+        self.bias_opt.zero_grad()
+        self.gate_opt.zero_grad()
         sr_loss.backward()
         self.synthetic_return_opt.step()
-        # self.bias_opt.step()
-        # self.gate_opt.step()
+        self.bias_opt.step()
+        self.gate_opt.step()
 
         self.sr_updates_so_far += 1
 
@@ -980,11 +984,11 @@ class EveAgent(object):
         if self.hps.enable_sr:
             checkpoint.update({
                 "synthetic_return": self.synthetic_return.state_dict(),
-                # "bias": self.bias.state_dict(),
-                # "gate": self.gate.state_dict(),
+                "bias": self.bias.state_dict(),
+                "gate": self.gate.state_dict(),
                 "synthetic_return_opt": self.synthetic_return_opt.state_dict(),
-                # "bias_opt": self.bias_opt.state_dict(),
-                # "gate_opt": self.gate_opt.state_dict(),
+                "bias_opt": self.bias_opt.state_dict(),
+                "gate_opt": self.gate_opt.state_dict(),
             })
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
@@ -1018,8 +1022,8 @@ class EveAgent(object):
             logger.warn("there is a twin the loaded tar, but you want none")
         if self.hps.enable_sr:
             self.synthetic_return.load_state_dict(checkpoint["synthetic_return"])
-            # self.bias.load_state_dict(checkpoint["bias"])
-            # self.gate.load_state_dict(checkpoint["gate"])
+            self.bias.load_state_dict(checkpoint["bias"])
+            self.gate.load_state_dict(checkpoint["gate"])
             self.synthetic_return_opt.load_state_dict(checkpoint["synthetic_return_opt"])
-            # self.bias_opt.load_state_dict(checkpoint["bias_opt"])
-            # self.gate_opt.load_state_dict(checkpoint["gate_opt"])
+            self.bias_opt.load_state_dict(checkpoint["bias_opt"])
+            self.gate_opt.load_state_dict(checkpoint["gate_opt"])

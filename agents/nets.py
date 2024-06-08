@@ -1,7 +1,7 @@
 import math
 from contextlib import nullcontext
 from collections import OrderedDict
-from typing import Callable
+from typing import Callable, Optional, Union
 
 from beartype import beartype
 from einops import rearrange, pack
@@ -413,7 +413,7 @@ class TanhGaussActor(Actor):
 
 class Base(nn.Module):
 
-    STACKED_LAYERS: int = 2
+    STACKED_LAYERS: int = 1
 
     @beartype
     def __init__(self,
@@ -422,74 +422,98 @@ class Base(nn.Module):
                  hid_dims: tuple[int, int],
                  rms_obs: RunningMoments,
                  *,
-                 lstm_dim: int,
-                 lstm_len: int,
                  layer_norm: bool,
+                 lstm_dim: Optional[int] = None,
+                 lstm_len: Optional[int] = None,
+                 lstm_mode: bool = False,
                  sigmoid_o: bool = False):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
-        self.lstm_dim = lstm_dim
-        self.lstm_len = lstm_len
+        self.lstm_mode = lstm_mode
+        if self.lstm_mode:
+            assert lstm_dim is not None
+            assert lstm_len is not None
+            self.lstm_dim = lstm_dim
+            self.lstm_len = lstm_len
         self.rms_obs = rms_obs
         self.layer_norm = layer_norm
         self.sigmoid_o = sigmoid_o
 
         # assemble the last layers and output heads
-        self.fc_stack_enc = nn.Sequential(OrderedDict([
-            ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.ReLU()),
-            ]))),
-            ("fc_block_2", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.ReLU()),
-            ]))),
-        ]))
-        self.lstm = nn.LSTM(
-            hid_dims[1], self.lstm_dim, num_layers=self.STACKED_LAYERS, batch_first=True)
-        self.fc_stack_dec = nn.Sequential(OrderedDict([
-            ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(self.lstm_dim, hid_dims[0])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.ReLU()),
-            ]))),
-            ("fc_block_2", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.ReLU()),
-            ]))),
-        ]))
+        if self.lstm_mode:
+            self.fc_stack_enc = nn.Sequential(OrderedDict([
+                ("fc_block_1", nn.Sequential(OrderedDict([
+                    ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
+                    ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
+                    ("nl", nn.ReLU()),
+                ]))),
+            ]))
+            self.lstm = nn.LSTM(
+                hid_dims[0], self.lstm_dim, num_layers=self.STACKED_LAYERS, batch_first=True)
+            self.fc_stack_dec = nn.Sequential(OrderedDict([
+                ("fc_block_1", nn.Sequential(OrderedDict([
+                    ("fc", nn.Linear(self.lstm_dim, hid_dims[0])),
+                    ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
+                    ("nl", nn.ReLU()),
+                ]))),
+                ("fc_block_2", nn.Sequential(OrderedDict([
+                    ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
+                    ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
+                    ("nl", nn.ReLU()),
+                ]))),
+            ]))
+        else:
+            self.fc_stack = nn.Sequential(OrderedDict([
+                ("fc_block_1", nn.Sequential(OrderedDict([
+                    ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
+                    ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
+                    ("nl", nn.ReLU()),
+                ]))),
+                ("fc_block_2", nn.Sequential(OrderedDict([
+                    ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
+                    ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
+                    ("nl", nn.ReLU()),
+                ]))),
+            ]))
         self.head = nn.Linear(hid_dims[1], 1)
 
         # perform initialization
-        self.fc_stack_enc.apply(init())
-        self.lstm.apply(init())
-        self.fc_stack_dec.apply(init())
+        if self.lstm_mode:
+            self.fc_stack_enc.apply(init())
+            self.lstm.apply(init())
+            self.fc_stack_dec.apply(init())
+        else:
+            self.fc_stack.apply(init())
         self.head.apply(init())
 
     @beartype
     def forward(self,
                 ob: torch.Tensor,
                 ac: torch.Tensor,
-                lens: torch.Tensor,
-                hs: tuple[torch.Tensor, torch.Tensor],
-        ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+                lens: Optional[torch.Tensor] = None,
+                hs: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]], torch.Tensor]:
         ob = self.rms_obs.standardize(ob).clamp(*STANDARDIZED_OB_CLAMPS)
         x, _ = pack([ob, ac], "b *")
-        x = self.fc_stack_enc(x)
-        x = rearrange(x, "(b t) d -> b t d", t=self.lstm_len)
-        packed_x = pack_padded_sequence(x, lens, batch_first=True, enforce_sorted=False)
-        packed_o, hs = self.lstm(packed_x, hs)
-        x, _ = pad_packed_sequence(packed_o, batch_first=True, total_length=self.lstm_len)
-        x = rearrange(x, "b t d -> (b t) d")
-        x = self.fc_stack_dec(x)
+        if self.lstm_mode:
+            assert lens is not None and hs is not None
+            x = self.fc_stack_enc(x)
+            x = rearrange(x, "(b t) d -> b t d", t=self.lstm_len)
+            packed_x = pack_padded_sequence(x, lens, batch_first=True, enforce_sorted=False)
+            packed_o, hs = self.lstm(packed_x, hs)
+            x, _ = pad_packed_sequence(packed_o, batch_first=True, total_length=self.lstm_len)
+            x = rearrange(x, "b t d -> (b t) d")
+            x = self.fc_stack_dec(x)
+        else:
+            x = self.fc_stack(x)
         x = self.head(x)
         if self.sigmoid_o:
             x = ff.sigmoid(x)
-        return x, hs
+        if self.lstm_mode:
+            assert hs is not None  # type-checker whining otherwise
+            return x, hs
+        return x
 
     @beartype
     def init_hs(self, batch_size):
