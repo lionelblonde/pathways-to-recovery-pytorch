@@ -18,7 +18,7 @@ from helpers.normalizer import RunningMoments
 from helpers.dataset import DemoDataset
 from helpers.math_util import huber_quant_reg_loss
 from agents.nets import (
-    log_module_info, Actor, TanhGaussActor, Critic, Discriminator, Base)
+    log_module_info, Actor, TanhGaussActor, Critic, LSTMCritic, Discriminator, Base)
 from agents.ac_noise import NormalActionNoise
 from agents.memory import ReplayBuffer, TrajectStore
 
@@ -143,8 +143,13 @@ class EveAgent(object):
         crit_net_args = [self.ob_shape, self.ac_shape, crit_hid_dims, self.rms_obs]
         crit_net_kwargs_keys = ["layer_norm", "use_c51", "c51_num_atoms", "use_qr", "num_tau"]
         crit_net_kwargs = {k: getattr(self.hps, k) for k in crit_net_kwargs_keys}
-        self.crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
-        self.targ_crit = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
+        if self.hps.lstm_mode:
+            crit_net_kwargs.update({"lstm_dim": self.LSTM_DIM, "lstm_len": self.hps.em_mxlen})
+            crit_module = LSTMCritic
+        else:
+            crit_module = Critic
+        self.crit = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
+        self.targ_crit = crit_module(*crit_net_args, **crit_net_kwargs).to(self.device)
 
         # initilize the target nets
         if self.hps.prefer_td3_over_sac:
@@ -196,15 +201,19 @@ class EveAgent(object):
 
         if self.hps.enable_sr:
             # create the synthetic returns, bias, and gate nets
-            base_hid_dims = (100, 100)
-            base_net_args = [self.ob_shape, self.ac_shape, base_hid_dims, self.rms_obs]
+            base_net_args = [
+                (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
+                self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
+            assert isinstance(xx_shape, tuple), "the shape must be a tuple"
+            logger.info(f"base nets are using: {base_hid_dims=}")
             base_net_kwargs_keys = ["layer_norm", "lstm_mode"]
             base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
-            if self.hps.lstm_mode:
-                base_net_kwargs["lstm_dim"] = self.LSTM_DIM
-                base_net_kwargs["lstm_len"] = self.hps.em_mxlen
+            base_net_kwargs["state_only"] = True  # add key and value
+
             self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            base_net_kwargs["state_only"] = self.hps.state_only_bias  # override value
             self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            base_net_kwargs["state_only"] = self.hps.state_only_gate  # override value
             self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
             # define their optimizers
             self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
@@ -318,8 +327,10 @@ class EveAgent(object):
     @beartype
     def compute_losses(self,
                        state: torch.Tensor,
+                       state_for_actr: torch.Tensor,
                        action: torch.Tensor,
                        next_state: torch.Tensor,
+                       next_state_for_actr: torch.Tensor,
                        next_action: torch.Tensor,
                        reward: torch.Tensor,
                        done: torch.Tensor,
@@ -332,12 +343,12 @@ class EveAgent(object):
 
         if self.hps.prefer_td3_over_sac:
             # using TD3
-            action_from_actr = self.actr.act(state)
+            action_from_actr = self.actr.act(state_for_actr)
             log_prob = None  # quiets down the type checker
         else:
             # using SAC
-            action_from_actr = self.actr.sample(state, stop_grad=False)
-            log_prob = self.actr.logp(state, action_from_actr, self.max_ac)
+            action_from_actr = self.actr.sample(state_for_actr, stop_grad=False)
+            log_prob = self.actr.logp(state_for_actr, action_from_actr, self.max_ac)
             # here, there are two gradient pathways: the reparam trick makes the sampling process
             # differentiable (pathwise derivative), and logp is a score function gradient estimator
             # intuition: aren't they competing and therefore messing up with each other's compute
@@ -532,60 +543,59 @@ class EveAgent(object):
 
     @beartype
     def update_actr_crit(self,
-                         trjs_batch: dict[str, torch.Tensor],
+                         trxs_batch: dict[str, torch.Tensor],  # trns or trjs
+                         lstm_precomp_hstate: Optional[tuple[torch.Tensor, torch.Tensor]],
                          *,
-                         update_actr: bool):
+                         update_actr: bool,
+                         use_sr: bool):
         """Update the critic and the actor"""
 
         with torch.no_grad():
             # define inputs
             sfx = "_orig" if self.hps.wrap_absorb else ""
 
-            state = trjs_batch[f"obs0{sfx}"]
-            seq_t_max = None
-            if self.hps.enable_sr:
-                _, seq_t_max, _ = state.size()
-            state = rearrange(state,
-                "b t d -> (b t) d")
+            state = trxs_batch[f"obs0{sfx}"]
+            if self.hps.lstm_mode:
+                state = rearrange(state,
+                    "b t d -> (b t) d")
             # update the observation normalizer
             self.rms_obs.update(state)
 
-            next_state = trjs_batch[f"obs1{sfx}"]
-            next_state = rearrange(next_state,
-                "b t d -> (b t) d")
+            next_state = trxs_batch[f"obs1{sfx}"]
+            if self.hps.lstm_mode:
+                next_state = rearrange(next_state,
+                    "b t d -> (b t) d")
 
-            action = trjs_batch[f"acs{sfx}"]
-            action = rearrange(action,
-                "b t d -> (b t) d")
+            action = trxs_batch[f"acs{sfx}"]
+            reward = trxs_batch["rews"]
+            done = trxs_batch["dones1"].float()
+            td_len = trxs_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
 
-            reward = trjs_batch["rews"]
-            reward = rearrange(reward,
-                "b t d -> (b t) d")
+            # create vars for state and next state to be used by the actor (never rec hidden state)
+            state_for_actr, next_state_for_actr = state, next_state
 
-            done = trjs_batch["dones1"].float()
-            done = rearrange(done,
-                "b t d -> (b t) d")
+            if self.hps.lstm_mode:
+                assert lstm_precomp_hstate is not None
+                # write over the state and next state
+                state, next_state = lstm_precomp_hstate
+                state = rearrange(state,
+                    "b t d -> (b t) d")
+                next_state = rearrange(next_state,
+                    "b t d -> (b t) d")
 
-            if self.hps.n_step_returns:
-                td_len = trjs_batch["td_len"]
+                action = rearrange(action,
+                    "b t d -> (b t) d")
+                reward = rearrange(reward,
+                    "b t d -> (b t) d")
+                done = rearrange(done,
+                    "b t d -> (b t) d")
                 td_len = rearrange(td_len,
                     "b t d -> (b t) d")
-            else:
-                td_len = torch.ones_like(done)
 
             # compute sr while still in the no-grad context manager: no need to detach by hand
-            if self.hps.enable_sr:
-                # create a new hidden state
-                istate = self.synthetic_return.init_hs(self.hps.batch_size * self.hps.num_env)
-                # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
-
-                # make a mask
-                assert seq_t_max is not None
-                mask = self.make_mask(seq_t_max, trjs_batch["len"])
-                length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
-
+            if self.hps.enable_sr and use_sr:
                 # compute the synthetic returns
-                synthetic_return, _ = self.synthetic_return(state, action, length, istate)
+                synthetic_return = self.synthetic_return(state, action)
                 if self.hps.amortized_advantage:
                     value_equivalent = repeat(
                         synthetic_return, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
@@ -601,16 +611,17 @@ class EveAgent(object):
                 n_ = action.clone().detach().normal_(0., self.hps.td3_std).to(self.device)
                 n_ = n_.clamp(-self.hps.td3_c, self.hps.td3_c)
                 next_action = (
-                    self.targ_actr.act(next_state) + n_).clamp(-self.max_ac, self.max_ac)
+                    self.targ_actr.act(next_state_for_actr) + n_).clamp(-self.max_ac, self.max_ac)
             else:
-                next_action = self.targ_actr.act(next_state)
+                next_action = self.targ_actr.act(next_state_for_actr)
         else:
             # using SAC
-            next_action = self.actr.sample(next_state, stop_grad=True)
+            next_action = self.actr.sample(next_state_for_actr, stop_grad=True)
 
         # compute critic and actor losses
         actr_loss, crit_loss, twin_loss, loga_loss = self.compute_losses(
-            state, action, next_state, next_action, reward, done, td_len)
+            state, state_for_actr, action, next_state, next_state_for_actr,
+            next_action, reward, done, td_len)
         # if `twin_loss` is None at this point, it means we are using C51 or QR
 
         if update_actr or (not self.hps.prefer_td3_over_sac):
@@ -683,24 +694,11 @@ class EveAgent(object):
                                      mask: torch.Tensor) -> torch.Tensor:
         """Compute sr loss batchwise in 3D"""
         _, seq_t_max, _ = state.size()
-        state = rearrange(state,
-            "b t d -> (b t) d")
-        action = rearrange(action,
-            "b t d -> (b t) d")
         inputs = (state, action)
-        istate = self.synthetic_return.init_hs(self.hps.batch_size * self.hps.num_env)
-        # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
-        length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
-        synthetic_return, _ = self.synthetic_return(*inputs, length, istate)
-        synthetic_return = rearrange(synthetic_return,
+        synthetic_return = rearrange(self.synthetic_return(*inputs),
             "(b t) d -> b t d", t=seq_t_max)
-        istate = self.bias.init_hs(self.hps.batch_size * self.hps.num_env)
-        bias, _ = self.bias(*inputs, length, istate)
-        bias = rearrange(bias,
-            "(b t) d -> b t d", t=seq_t_max)
-        gate, _ = self.gate(*inputs, length, istate)
-        gate = rearrange(gate,
-            "(b t) d -> b t d", t=seq_t_max)
+        bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
         if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             self.send_to_dash({
                 "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
@@ -712,37 +710,66 @@ class EveAgent(object):
         return loss.sum() / mask.sum()
 
     @beartype
-    def update_sr(self, trjs_batch: dict[str, torch.Tensor]):
+    def update_sr(self,
+                  trjs_batch: dict[str, torch.Tensor],
+                  *,
+                  just_relay_hstate: bool,
+        ) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
         """Update the sr components"""
         with torch.no_grad():
             # define inputs
             sfx = "_orig" if self.hps.wrap_absorb else ""
             state = trjs_batch[f"obs0{sfx}"]
+            _, seq_t_max, _ = state.size()  # for mask
             action = trjs_batch[f"acs{sfx}"]
             reward = trjs_batch["rews"]
+            length = trjs_batch["len"]  # for mask
             # make a mask
-            _, seq_t_max, _ = state.size()
-            mask = self.make_mask(seq_t_max, trjs_batch["len"])
+            mask = self.make_mask(seq_t_max, length)
         logger.debug(f"num of non-masked elements: {mask.sum()}")
         # note: also contains the obs1/obs1_orig key, which is only used for reward patching
 
-        # compute the sr loss using full-batch ops
-        sr_loss = self.compute_sr_loss_batch3dseq0d(state, action, reward, mask)
+        if self.hps.lstm_mode:
+            istate = self.crit.init_hs(self.hps.batch_size * self.hps.num_env)
+            # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
+            length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
+            hstate, _ = self.crit.lstm_pipe(state, length, istate)
+            state = hstate
 
-        self.synthetic_return_opt.zero_grad()
-        self.bias_opt.zero_grad()
-        self.gate_opt.zero_grad()
-        sr_loss.backward()
-        self.synthetic_return_opt.step()
-        self.bias_opt.step()
-        self.gate_opt.step()
+        if not just_relay_hstate:
+            assert self.hps.enable_sr
+            # update sr networks
 
-        self.sr_updates_so_far += 1
+            # compute the sr loss using full-batch ops
+            sr_loss = self.compute_sr_loss_batch3dseq0d(
+                state.clone().detach(), action, reward, mask)
 
-        if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
-            self.send_to_dash({
-                "sr_loss": sr_loss.numpy(force=True),
-            }, step_metric=self.sr_updates_so_far, glob="train_sr")
+            self.synthetic_return_opt.zero_grad()
+            self.bias_opt.zero_grad()
+            self.gate_opt.zero_grad()
+            sr_loss.backward()
+            self.synthetic_return_opt.step()
+            self.bias_opt.step()
+            self.gate_opt.step()
+
+            self.sr_updates_so_far += 1
+
+            if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
+                self.send_to_dash({
+                    "sr_loss": sr_loss.numpy(force=True),
+                }, step_metric=self.sr_updates_so_far, glob="train_sr")
+
+        if self.hps.lstm_mode:
+            with torch.no_grad():
+                next_state = trjs_batch[f"obs1{sfx}"]
+            # return not only the rec version of the state but also the next state
+            istate = self.targ_crit.init_hs(self.hps.batch_size * self.hps.num_env)
+            # returns a tuple of elements of size (1, batch_size x num_env, lstm_dim)
+            length = rearrange(mask.sum(dim=1), "b 1 -> b").cpu()  # equiv: squeeze(dim=-1)
+            hstate, _ = self.targ_crit.lstm_pipe(next_state, length, istate)
+            next_state = hstate
+            return (state, next_state)
+        return None
 
     @beartype
     def update_disc(self, trns_batch: dict[str, torch.Tensor]):
