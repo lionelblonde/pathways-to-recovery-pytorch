@@ -588,6 +588,7 @@ class EveAgent(object):
                     "b t d -> (b t) d")
 
             # compute sr while still in the no-grad context manager: no need to detach by hand
+            synthetic_return = None
             if self.hps.enable_sr and use_sr:
                 # compute the synthetic returns
                 synthetic_return = self.synthetic_return(state, action)
@@ -670,6 +671,16 @@ class EveAgent(object):
             wandb_dict = {"crit_loss": crit_loss.numpy(force=True)}
             if twin_loss is not None:
                 wandb_dict.update({"twin_loss": twin_loss.numpy(force=True)})
+            # add quantile stats  about the reward distribution
+            r_map = {"adversarial": reward}
+            if self.hps.enable_sr and use_sr:
+                r_map.update({"sr": synthetic_return})
+            for k, v in r_map.items():
+                wandb_dict[f"{k}-q01"] = v.quantile(q=0.01)
+                wandb_dict[f"{k}-q10"] = v.quantile(q=0.10)
+                wandb_dict[f"{k}-q50"] = v.quantile(q=0.50)
+                wandb_dict[f"{k}-q90"] = v.quantile(q=0.90)
+                wandb_dict[f"{k}-q99"] = v.quantile(q=0.99)
             self.send_to_dash(
                 wandb_dict,
                 step_metric=self.crit_updates_so_far,
