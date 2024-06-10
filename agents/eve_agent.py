@@ -589,17 +589,17 @@ class EveAgent(object):
                     "b t d -> (b t) d")
 
             # compute sr while still in the no-grad context manager: no need to detach by hand
-            synthetic_return = None
+            sr = None
             if self.hps.enable_sr and use_sr:
                 # compute the synthetic returns
-                synthetic_return = self.synthetic_return(state, action)
+                sr = self.synthetic_return(state, action)
                 if self.hps.amortized_advantage:
                     value_equivalent = repeat(
-                        synthetic_return, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
+                        sr, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
                     ).clone().detach().uniform_(-self.max_ac, self.max_ac).mean(dim=0)
-                    synthetic_return = synthetic_return - value_equivalent
+                    sr -= value_equivalent
                 # modify the rewards by interpolating them with the sr values
-                reward = (self.hps.sr_alpha * synthetic_return) + (self.hps.sr_beta * reward)
+                reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
 
         # compute target action
         if self.hps.prefer_td3_over_sac:
@@ -673,9 +673,12 @@ class EveAgent(object):
             if twin_loss is not None:
                 wandb_dict.update({"twin_loss": twin_loss.numpy(force=True)})
             # add quantile stats  about the reward distribution
-            r_map = {"adversarial": reward}
+            r_map = {}
             if self.hps.enable_sr and use_sr:
-                r_map.update({"sr": synthetic_return})
+                r_map["sr"] = sr
+                r_map["adversarial"] = (reward - (self.hps.sr_alpha * sr)) / self.hps.sr_beta
+            else:
+                r_map["adversarial"] = reward
             for k, v in r_map.items():
                 wandb_dict[f"{k}-q01"] = v.quantile(q=0.01)
                 wandb_dict[f"{k}-q10"] = v.quantile(q=0.10)
@@ -943,7 +946,7 @@ class EveAgent(object):
         if self.hps.minimax_only:
             reward = minimax_reward
         else:
-            # counterpart of GAN"s non-saturating loss
+            # counterpart of GAN's non-saturating loss
             # recommended in the original GAN paper and later in (Fedus et al. 2017)
             # numerics: 0 for expert-like states, goes to -inf for non-expert-like states
             # compatible with envs with traj cutoffs for good (expert-like) behavior
