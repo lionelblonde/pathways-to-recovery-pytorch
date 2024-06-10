@@ -513,23 +513,27 @@ class Base(nn.Module):
                  rms_obs: RunningMoments,
                  *,
                  layer_norm: bool,
+                 spectral_norm: bool = True,
                  sigmoid_o: bool = False):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
         self.rms_obs = rms_obs
         self.layer_norm = layer_norm
+        self.spectral_norm = spectral_norm
         self.sigmoid_o = sigmoid_o
+
+        apply_sn = snwrap(use_sn=self.spectral_norm)  # spectral normalization
 
         # assemble the last layers and output heads
         self.fc_stack = nn.Sequential(OrderedDict([
             ("fc_block_1", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(ob_dim + ac_dim, hid_dims[0])),
+                ("fc", apply_sn(nn.Linear(ob_dim + ac_dim, hid_dims[0]))),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
                 ("nl", nn.ReLU()),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
-                ("fc", nn.Linear(hid_dims[0], hid_dims[1])),
+                ("fc", apply_sn(nn.Linear(hid_dims[0], hid_dims[1]))),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
                 ("nl", nn.ReLU()),
             ]))),

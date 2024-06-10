@@ -206,8 +206,7 @@ class EveAgent(object):
                 self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
             assert isinstance(xx_shape, tuple), "the shape must be a tuple"
             logger.info(f"base nets are using: {base_hid_dims=}")
-            base_net_kwargs_keys = ["layer_norm"]
-            base_net_kwargs = {k: getattr(self.hps, k) for k in base_net_kwargs_keys}
+            base_net_kwargs = {"layer_norm": False, "spectral_norm": True}
             self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
             self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
             self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)

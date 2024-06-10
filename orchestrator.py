@@ -464,6 +464,7 @@ def learn(cfg: DictConfig,
 
             gts = timer()
             for _ in range(gs := cfg.g_steps):
+
                 # sample a batch of transitions and trajectories
                 trns_batch = None
                 if not cfg.lstm_mode:
