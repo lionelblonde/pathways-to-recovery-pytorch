@@ -20,6 +20,14 @@ ENV_BUNDLES = {
     "debug": [
         "Walker2d-v4",
     ],
+    "antwalker": [
+        "Walker2d-v4",
+        "Ant-v4",
+    ],
+    "humanoidhopper": [
+        "Hopper-v4",
+        "Humanoid-v4",
+    ],
     "suite": [
         "Ant-v4",
         "HalfCheetah-v4",
@@ -37,7 +45,7 @@ ENV_BUNDLES = {
 
 MEMORY = 16
 NUM_NODES = 1
-NUM_WORKERS = 1
+NUM_WORKERS = 4
 NUM_SWEEP_TRIALS = 10
 
 
