@@ -207,14 +207,14 @@ class EveAgent(object):
             assert isinstance(xx_shape, tuple), "the shape must be a tuple"
             logger.info(f"base nets are using: {base_hid_dims=}")
             base_net_kwargs = {"layer_norm": True, "spectral_norm": True}
-            self.synthetic_return = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            self.cee = Base(*base_net_args, **base_net_kwargs).to(self.device)
             base_net_kwargs = {"layer_norm": True, "spectral_norm": False}  # sn turned off
-            self.bias = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            self.gate = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
+            self.bee = Base(*base_net_args, **base_net_kwargs).to(self.device)
+            self.gee = Base(*base_net_args, **base_net_kwargs, sigmoid_o=True).to(self.device)
             # define their optimizers
-            self.synthetic_return_opt = Adam(self.synthetic_return.parameters(), lr=1e-4)
-            self.bias_opt = Adam(self.bias.parameters(), lr=1e-4)
-            self.gate_opt = Adam(self.gate.parameters(), lr=1e-4)
+            self.cee_opt = Adam(self.cee.parameters(), lr=1e-4)
+            self.bee_opt = Adam(self.bee.parameters(), lr=1e-4)
+            self.gee_opt = Adam(self.gee.parameters(), lr=1e-4)
 
         # log module architectures
         log_module_info(self.actr)
@@ -223,9 +223,9 @@ class EveAgent(object):
             log_module_info(self.twin)
         log_module_info(self.disc)
         if self.hps.enable_sr:
-            log_module_info(self.synthetic_return)
-            log_module_info(self.bias)
-            log_module_info(self.gate)
+            log_module_info(self.cee)
+            log_module_info(self.bee)
+            log_module_info(self.gee)
 
     @property
     def alpha(self):
@@ -588,18 +588,18 @@ class EveAgent(object):
                 td_len = rearrange(td_len,
                     "b t d -> (b t) d")
 
-            # compute sr while still in the no-grad context manager: no need to detach by hand
-            sr = None
+            # compute c(s,a) while still in the no-grad context manager: no need to detach by hand
+            cee = None
             if self.hps.enable_sr and use_sr:
-                # compute the synthetic returns
-                sr = self.synthetic_return(state, action)
+                # compute c(s,a)
+                cee = self.cee(state, action)
                 if self.hps.amortized_advantage:
                     value_equivalent = repeat(
-                        sr, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
+                        cee, "b d -> r b d", r=self.AMORTIZED_INFERENCE_REPEATS,
                     ).clone().detach().uniform_(-self.max_ac, self.max_ac).mean(dim=0)
-                    sr -= value_equivalent
+                    cee -= value_equivalent
                 # modify the rewards by interpolating them with the sr values
-                reward = (self.hps.sr_alpha * sr) + (self.hps.sr_beta * reward)
+                reward = (self.hps.sr_alpha * cee) + (self.hps.sr_beta * reward)
 
         # compute target action
         if self.hps.prefer_td3_over_sac:
@@ -675,8 +675,9 @@ class EveAgent(object):
             # add quantile stats  about the reward distribution
             r_map = {}
             if self.hps.enable_sr and use_sr:
-                r_map["sr"] = sr
-                r_map["adversarial"] = (reward - (self.hps.sr_alpha * sr)) / self.hps.sr_beta
+                r_map["cee"] = cee
+                r_map["advers"] = (reward - (self.hps.sr_alpha * cee)) / self.hps.sr_beta
+                r_map["weisum"] = reward
             else:
                 r_map["adversarial"] = reward
             for k, v in r_map.items():
@@ -1024,12 +1025,12 @@ class EveAgent(object):
             })
         if self.hps.enable_sr:
             checkpoint.update({
-                "synthetic_return": self.synthetic_return.state_dict(),
-                "bias": self.bias.state_dict(),
-                "gate": self.gate.state_dict(),
-                "synthetic_return_opt": self.synthetic_return_opt.state_dict(),
-                "bias_opt": self.bias_opt.state_dict(),
-                "gate_opt": self.gate_opt.state_dict(),
+                "cee": self.cee.state_dict(),
+                "bee": self.bee.state_dict(),
+                "gee": self.gee.state_dict(),
+                "cee_opt": self.cee_opt.state_dict(),
+                "bee_opt": self.bee_opt.state_dict(),
+                "gee_opt": self.gee_opt.state_dict(),
             })
         # save checkpoint to filesystem
         torch.save(checkpoint, path)
@@ -1062,9 +1063,9 @@ class EveAgent(object):
         elif "twin" in checkpoint:  # in the case where clipped double is off
             logger.warn("there is a twin the loaded tar, but you want none")
         if self.hps.enable_sr:
-            self.synthetic_return.load_state_dict(checkpoint["synthetic_return"])
-            self.bias.load_state_dict(checkpoint["bias"])
-            self.gate.load_state_dict(checkpoint["gate"])
-            self.synthetic_return_opt.load_state_dict(checkpoint["synthetic_return_opt"])
-            self.bias_opt.load_state_dict(checkpoint["bias_opt"])
-            self.gate_opt.load_state_dict(checkpoint["gate_opt"])
+            self.cee.load_state_dict(checkpoint["cee"])
+            self.bee.load_state_dict(checkpoint["bee"])
+            self.gee.load_state_dict(checkpoint["gee"])
+            self.cee_opt.load_state_dict(checkpoint["cee_opt"])
+            self.bee_opt.load_state_dict(checkpoint["bee_opt"])
+            self.gee_opt.load_state_dict(checkpoint["gee_opt"])
