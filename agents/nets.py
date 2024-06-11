@@ -551,5 +551,5 @@ class Base(nn.Module):
         x = self.fc_stack(x)
         x = self.head(x)
         if self.out_activ:
-            x = ff.softsign(x)
+            x = ff.sigmoid(x)
         return x
