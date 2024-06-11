@@ -514,14 +514,14 @@ class Base(nn.Module):
                  *,
                  layer_norm: bool,
                  spectral_norm: bool = True,
-                 sigmoid_o: bool = False):
+                 out_activ: bool = False):
         super().__init__()
         ob_dim = ob_shape[-1]
         ac_dim = ac_shape[-1]
         self.rms_obs = rms_obs
         self.layer_norm = layer_norm
         self.spectral_norm = spectral_norm
-        self.sigmoid_o = sigmoid_o
+        self.out_activ = out_activ
 
         apply_sn = snwrap(use_sn=self.spectral_norm)  # spectral normalization
 
@@ -550,6 +550,6 @@ class Base(nn.Module):
         x, _ = pack([ob, ac], "b *")
         x = self.fc_stack(x)
         x = self.head(x)
-        if self.sigmoid_o:
-            x = ff.sigmoid(x)
+        if self.out_activ:
+            x = ff.softsign(x)
         return x
