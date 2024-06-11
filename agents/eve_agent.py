@@ -200,7 +200,6 @@ class EveAgent(object):
         logger.info(f"{t_max = }")
 
         if self.hps.enable_sr:
-            # create the synthetic returns, bias, and gate nets
             base_net_args = [
                 (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
                 self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
@@ -679,7 +678,7 @@ class EveAgent(object):
                 r_map["advers"] = (reward - (self.hps.sr_alpha * cee)) / self.hps.sr_beta
                 r_map["weisum"] = reward
             else:
-                r_map["adversarial"] = reward
+                r_map["advers"] = reward
             for k, v in r_map.items():
                 wandb_dict[f"{k}-q01"] = v.quantile(q=0.01)
                 wandb_dict[f"{k}-q10"] = v.quantile(q=0.10)
@@ -710,17 +709,17 @@ class EveAgent(object):
         action = rearrange(action,
             "b t d -> (b t) d")
         inputs = (state, action)
-        synthetic_return = rearrange(self.synthetic_return(*inputs),
+        cee = rearrange(self.cee(*inputs),
             "(b t) d -> b t d", t=seq_t_max)
-        bias = rearrange(self.bias(*inputs), "(b t) d -> b t d", t=seq_t_max)
-        gate = rearrange(self.gate(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        bee = rearrange(self.bee(*inputs), "(b t) d -> b t d", t=seq_t_max)
+        gee = rearrange(self.gee(*inputs), "(b t) d -> b t d", t=seq_t_max)
         if self.sr_updates_so_far % self.TRAIN_METRICS_WANDB_LOG_FREQ == 0:
             self.send_to_dash({
-                "gate-mean": (gate.sum() / mask.sum()).numpy(force=True),
+                "gate-mean": (gee.sum() / mask.sum()).numpy(force=True),
                 "mask-fill-perc": (100. * mask.sum() / mask.numel()).numpy(force=True),
             }, step_metric=self.sr_updates_so_far, glob="train_sr")
-        gated_sum = gate * (torch.cumsum(synthetic_return, dim=1) - synthetic_return)
-        loss = mask * (reward - gated_sum - bias)
+        gated_sum = gee * (torch.cumsum(cee, dim=1) - cee)
+        loss = mask * (reward - gated_sum - bee)
         loss = 0.5 * loss.pow(2)
         return loss.sum() / mask.sum()
 
@@ -759,13 +758,13 @@ class EveAgent(object):
             sr_loss = self.compute_sr_loss_batch3dseq0d(
                 state.clone().detach(), action, reward, mask)
 
-            self.synthetic_return_opt.zero_grad()
-            self.bias_opt.zero_grad()
-            self.gate_opt.zero_grad()
+            self.cee_opt.zero_grad()
+            self.bee_opt.zero_grad()
+            self.gee_opt.zero_grad()
             sr_loss.backward()
-            self.synthetic_return_opt.step()
-            self.bias_opt.step()
-            self.gate_opt.step()
+            self.cee_opt.step()
+            self.bee_opt.step()
+            self.gee_opt.step()
 
             self.sr_updates_so_far += 1
 
