@@ -443,6 +443,9 @@ def learn(cfg: DictConfig,
     while agent.timesteps_so_far <= cfg.num_timesteps:
 
         logger.info((f"iter#{i}").upper())
+        if i % cfg.eval_every == 0:
+            logger.warn((f"iter#{i}").upper())
+            # so that when logger level is WARN, we see the iter number before the the eval metrics
 
         logger.info(("interact").upper())
         its = timer()
