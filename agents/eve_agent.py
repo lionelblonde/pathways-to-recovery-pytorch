@@ -167,8 +167,8 @@ class EveAgent(object):
         disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
         logger.debug(f"discriminator net is using: {disc_hid_dims=}")
         disc_net_kwargs_keys = ["wrap_absorb", "d_batch_norm", "spectral_norm", "state_only"]
-        disc_net_kwargs_keys["layer_norm"] = True
         disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
+        disc_net_kwargs["layer_norm"] = True
         self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
 
         # set up the optimizers
