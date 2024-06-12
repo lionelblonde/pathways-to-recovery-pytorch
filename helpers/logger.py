@@ -223,6 +223,13 @@ def error(*args):
     log(*args, level=ERROR)
 
 
+def get_level() -> int:
+    """Get the level of the current logger"""
+    if Logger.CURRENT is not None:
+        return Logger.CURRENT.level
+    return -1
+
+
 def set_level(level):
     """Set logging threshold on current logger"""
     if Logger.CURRENT is not None:
