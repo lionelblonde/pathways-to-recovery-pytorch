@@ -56,7 +56,7 @@ def get_name(uuid: str, env_id: str, seed: int) -> str:
 class MagicRunner(object):
 
     DISABLE_LOGGER: bool = False
-    LOGGER_LEVEL: int = logger.ERROR
+    LOGGER_LEVEL: int = logger.WARN
     PRODUCTION_MODE: bool = True
 
     @beartype
