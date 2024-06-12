@@ -168,7 +168,7 @@ class EveAgent(object):
         logger.debug(f"discriminator net is using: {disc_hid_dims=}")
         disc_net_kwargs_keys = ["wrap_absorb", "d_batch_norm", "spectral_norm", "state_only"]
         disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
-        disc_net_kwargs["layer_norm"] = True
+        disc_net_kwargs["layer_norm"] = False
         self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
 
         # set up the optimizers
@@ -206,9 +206,9 @@ class EveAgent(object):
                 self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
             assert isinstance(xx_shape, tuple), "the shape must be a tuple"
             logger.info(f"base nets are using: {base_hid_dims=}")
-            base_net_kwargs = {"layer_norm": True, "spectral_norm": True}
+            base_net_kwargs = {"layer_norm": False, "spectral_norm": True}
             self.cee = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            base_net_kwargs = {"layer_norm": True, "spectral_norm": False}  # sn turned off
+            base_net_kwargs = {"layer_norm": False, "spectral_norm": False}  # sn turned off
             self.bee = Base(*base_net_args, **base_net_kwargs).to(self.device)
             self.gee = Base(*base_net_args, **base_net_kwargs, out_activ=True).to(self.device)
             # define their optimizers
