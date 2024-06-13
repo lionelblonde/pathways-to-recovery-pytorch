@@ -41,7 +41,6 @@ class EveAgent(object):
                  expert_dataset: Optional[DemoDataset],
                  replay_buffers: Optional[list[ReplayBuffer]],
                  traject_stores: Optional[list[TrajectStore]]):
-
         self.ob_shape, self.ac_shape = net_shapes["ob_shape"], net_shapes["ac_shape"]
         # the self here needed because those shapes are used in the orchestrator
         self.max_ac = max_ac
