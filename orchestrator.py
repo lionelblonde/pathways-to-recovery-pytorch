@@ -17,8 +17,7 @@ import numpy as np
 
 import gymnasium as gym
 from gymnasium.core import Env
-from gymnasium.experimental.vector.async_vector_env import AsyncVectorEnv
-from gymnasium.experimental.vector.sync_vector_env import SyncVectorEnv
+from gymnasium.experimental.vector.vector_env import VectorEnv
 
 from helpers import logger
 from helpers.opencv_util import record_video
@@ -51,7 +50,8 @@ def timed(op: str, timer: Callable[[], float]):
 
 
 @beartype
-def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
+def segment(env: Union[Env, VectorEnv],
+            num_env: int,
             agent: EveAgent,
             seed: int,
             segment_len: int,
@@ -71,8 +71,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         assert agent.traject_stores is not None
         ongoing_trajs = [
             deque([], maxlen=(length := agent.traject_stores[0].em_mxlen))
-            for _ in range(
-                env.num_envs if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)) else 1)]
+            for _ in range(num_env)]
         # as usual, index 0 chosen because it always exists whether vecencs are used or not
         logger.warn(f"the ongoing trajects are stored in deques of {length=}")
 
@@ -93,13 +92,13 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         # interact with env
         new_ob, _, terminated, truncated, info = env.step(ac)  # reward ignored
 
-        if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
+        if num_env > 1:
             logger.debug(f"{terminated=} | {truncated=}")
             assert isinstance(terminated, np.ndarray)
             assert isinstance(truncated, np.ndarray)
             assert terminated.shape == truncated.shape
 
-        if not isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
+        if num_env == 1:
             assert isinstance(env, Env)
             done, terminated = np.array([terminated or truncated]), np.array([terminated])
             if truncated:
@@ -114,8 +113,8 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         # note: we use terminated as a done replacement, but keep the key "dones1"
         # because it is the key used in the demo files
 
-        if isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
-            pp_func = partial(postproc_vtr, env.num_envs, info)
+        if num_env > 1:
+            pp_func = partial(postproc_vtr, num_env, info)
         else:
             assert isinstance(env, Env)
             pp_func = postproc_tr
@@ -155,7 +154,7 @@ def segment(env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
         # set current state with the next
         ob = deepcopy(new_ob)
 
-        if not isinstance(env, (AsyncVectorEnv, SyncVectorEnv)):
+        if num_env == 1:
             assert isinstance(env, Env)
             if done:
                 ob, _ = env.reset(seed=seed)
@@ -364,7 +363,7 @@ def evaluate(cfg: DictConfig,
 
 @beartype
 def learn(cfg: DictConfig,
-          env: Union[Env, AsyncVectorEnv, SyncVectorEnv],
+          env: Union[Env, VectorEnv],
           eval_env: Env,
           agent_wrapper: Callable[[], EveAgent],
           timer_wrapper: Callable[[], Callable[[], float]],
@@ -426,7 +425,7 @@ def learn(cfg: DictConfig,
 
     # create segment generator for training the agent
     roll_gen = segment(
-        env, agent, cfg.seed, cfg.segment_len,
+        env, cfg.num_env, agent, cfg.seed, cfg.segment_len,
         wrap_absorb=cfg.wrap_absorb, lstm_mode=cfg.lstm_mode, enable_sr=cfg.enable_sr)
     # create episode generator for evaluating the agent
     ep_gen = episode(eval_env, agent, cfg.seed)

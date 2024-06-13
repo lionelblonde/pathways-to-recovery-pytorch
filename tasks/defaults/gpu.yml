@@ -3,8 +3,9 @@ cuda: true
 fp16: false
 
 # env
-vecenv: true
-numenv: 4
+vecenv: false
+numenv: 0
+horizon: 128
 
 # logging
 wandb_project: "damnlemons"
@@ -23,7 +24,7 @@ layer_norm: true
 # optimization
 actor_lr: 2.5e-4
 critic_lr: 2.5e-4
-clip_norm: 50.
+clip_norm: 0.
 wd_scale: 0.
 
 # algorithm

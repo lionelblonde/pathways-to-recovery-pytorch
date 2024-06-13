@@ -156,8 +156,9 @@ class MagicRunner(object):
         # env
         env, net_shapes, erb_shapes, max_ac, max_ep_steps = make_env(
             self._cfg.env_id,
+            self._cfg.horizon,
             vectorized=self._cfg.vecenv,
-            num_envs=self._cfg.numenv,
+            num_env=self._cfg.num_env,
             wrap_absorb=self._cfg.wrap_absorb,
             record=False,
             render=self._cfg.render,
@@ -228,6 +229,7 @@ class MagicRunner(object):
         # create an evaluation environment not to mess up with training rollouts
         eval_env, _, _, _, _ = make_env(
             self._cfg.env_id,
+            horizon=1000,
             vectorized=False,
             wrap_absorb=self._cfg.wrap_absorb,
             record=self._cfg.record,
@@ -278,6 +280,7 @@ class MagicRunner(object):
         # env
         env, net_shapes, _, max_ac, _ = make_env(
             self._cfg.env_id,
+            horizon=1000,
             vectorized=False,
             wrap_absorb=self._cfg.wrap_absorb,
             record=self._cfg.record,

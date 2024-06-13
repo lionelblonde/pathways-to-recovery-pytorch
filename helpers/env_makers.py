@@ -7,8 +7,8 @@ from beartype import beartype
 
 import gymnasium as gym
 from gymnasium.core import Env
+from gymnasium.wrappers.time_limit import TimeLimit
 from gymnasium.experimental.vector.async_vector_env import AsyncVectorEnv
-from gymnasium.experimental.vector.sync_vector_env import SyncVectorEnv
 
 from helpers import logger
 import environments
@@ -31,13 +31,14 @@ def get_benchmark(env_id: str):
 @beartype
 def make_env(
     env_id: str,
+    horizon: int,
     *,
     vectorized: bool,
-    num_envs: Optional[int] = None,
+    num_env: Optional[int] = None,
     wrap_absorb: bool,
     record: bool,
     render: bool,
-    ) -> tuple[Union[Env, AsyncVectorEnv, SyncVectorEnv],
+    ) -> tuple[Union[Env, AsyncVectorEnv],
     dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], float, int]:
 
     # create an environment
@@ -55,8 +56,9 @@ def make_env(
 
         return make_farama_mujoco_env(
             env_id,
+            horizon,
             vectorized=vectorized,
-            num_envs=num_envs,
+            num_env=num_env,
             wrap_absorb=wrap_absorb,
             record=record,
             render=render,
@@ -67,20 +69,21 @@ def make_env(
 @beartype
 def make_farama_mujoco_env(
     env_id: str,
+    horizon: int,
     *,
     vectorized: bool,
-    num_envs: Optional[int],
+    num_env: Optional[int],
     wrap_absorb: bool,
     record: bool,
     render: bool,
-    ) -> tuple[Union[Env, AsyncVectorEnv, SyncVectorEnv],
+    ) -> tuple[Union[Env, AsyncVectorEnv],
     dict[str, tuple[int, ...]], dict[str, tuple[int, ...]], float, int]:
 
     # not ideal for code golf, but clearer for debug
 
     assert sum([record, vectorized]) <= 1, "not both same time"
     assert sum([render, vectorized]) <= 1, "not both same time"
-    assert (not vectorized) or (num_envs is not None), "must give num_envs when vectorized"
+    assert (not vectorized) or (num_env is not None), "must give num_envs when vectorized"
 
     # create env
     # normally the windowed one is "human" .other option for later: "rgb_array", but prefer:
@@ -91,9 +94,13 @@ def make_farama_mujoco_env(
         env = gym.make(env_id, render_mode="human")
         # reference: https://younis.dev/blog/render-api/
     elif vectorized:
-        assert num_envs is not None
-        env = gym.make_vec(env_id, num_envs=num_envs, vectorization_mode="async")
-        assert isinstance(env, (AsyncVectorEnv, SyncVectorEnv))
+        assert num_env is not None
+        assert horizon is not None
+        env = AsyncVectorEnv([
+            lambda: TimeLimit(gym.make(env_id), max_episode_steps=horizon)
+            for _ in range(num_env)
+        ])
+        assert isinstance(env, AsyncVectorEnv)
         logger.info("using vectorized envs")
     else:
         env = gym.make(env_id)
@@ -148,13 +155,8 @@ def make_farama_mujoco_env(
     # despite the fact that we use the max, the actions are clipped with min and max
     # during interaction in the orchestrator
 
-    # max episode length
-    # use to be needed to determine the nature of termination in env
-    # (Farama's Gymnasium make the distinction now in the `step` output)
-    # now it is just needed to wrap the absorbing states in the demo dataset
-    assert env.spec is not None
-    max_ep_steps = env.spec.max_episode_steps
-    assert max_ep_steps is not None
+    # needed to wrap the absorbing states in the demo dataset
+    max_ep_steps = horizon
     if wrap_absorb:
         # when wrapping with absorbing states, count the extra transition
         max_ep_steps += 1
