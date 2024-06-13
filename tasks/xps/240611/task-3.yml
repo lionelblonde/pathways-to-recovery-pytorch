@@ -14,8 +14,8 @@ render: false
 # training
 num_timesteps: 10000000
 training_steps_per_iter: 1
-eval_steps_per_iter: 1000
-eval_every: 10000
+eval_steps_per_iter: 10
+eval_every: 100
 
 # model
 layer_norm: true
