@@ -260,7 +260,11 @@ def episode(env: Env,
     assert isinstance(env.action_space, gym.spaces.Box)  # to ensure `high` and `low` exist
     ac_low, ac_high = env.action_space.low, env.action_space.high
 
-    ob, _ = env.reset(seed=seed)
+    rng = np.random.default_rng(seed)  # aligned on seed, so always reproducible
+    logger.warn("remember: in episode generator, we generate a seed randomly")
+    logger.warn("i.e. not using 'ob, _ = env.reset(seed=seed)' with same seed")
+    # note that despite sampling a new seed, it is using a seeded rng: reproducible
+    ob, _ = env.reset(seed=seed + rng.integers(100000, size=1).item())
 
     cur_ep_len = 0
     cur_ep_env_ret = 0
@@ -305,7 +309,9 @@ def episode(env: Env,
             obs = []
             acs = []
             env_rews = []
-            ob, _ = env.reset(seed=seed)
+            logger.warn("remember: in episode generator, we generate a seed randomly")
+            logger.warn("i.e. not using 'ob, _ = env.reset(seed=seed)' with same seed")
+            ob, _ = env.reset(seed=seed + rng.integers(100000, size=1).item())
 
 
 @beartype
@@ -428,7 +434,8 @@ def learn(cfg: DictConfig,
         env, cfg.num_env, agent, cfg.seed, cfg.segment_len,
         wrap_absorb=cfg.wrap_absorb, lstm_mode=cfg.lstm_mode, enable_sr=cfg.enable_sr)
     # create episode generator for evaluating the agent
-    ep_gen = episode(eval_env, agent, cfg.seed)
+    eval_seed = cfg.seed + 123456  # arbitrary choice
+    ep_gen = episode(eval_env, agent, eval_seed)
 
     i = 0
 
