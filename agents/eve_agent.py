@@ -205,9 +205,8 @@ class EveAgent(object):
                 self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
             assert isinstance(xx_shape, tuple), "the shape must be a tuple"
             logger.info(f"base nets are using: {base_hid_dims=}")
-            base_net_kwargs = {"layer_norm": False, "spectral_norm": True}
+            base_net_kwargs = {"layer_norm": False, "spectral_norm": False}  # TODO(lionel): fix
             self.cee = Base(*base_net_args, **base_net_kwargs).to(self.device)
-            base_net_kwargs = {"layer_norm": False, "spectral_norm": False}  # sn turned off
             self.bee = Base(*base_net_args, **base_net_kwargs).to(self.device)
             self.gee = Base(*base_net_args, **base_net_kwargs, out_activ=True).to(self.device)
             # define their optimizers
