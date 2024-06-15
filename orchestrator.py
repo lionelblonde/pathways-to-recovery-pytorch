@@ -129,17 +129,12 @@ def segment(env: Union[Env, VectorEnv],
                     # add transition to the currently ongoing trajectory in the i-th env
                     assert ongoing_trajs is not None
                     ongoing_trajs[i].append(pp_out)
+                    # add the trajectory to the i-th traject store
+                    assert agent.traject_stores is not None  # quiets down the type-checker
+                    agent.traject_stores[i].append(list(ongoing_trajs[i]))
 
                     if bool(pp_out["dones1"]) and (j + 1) == len(outs):
                         # second cond: if absorbing, there are two dones in a row -> stop at last
-
-                        # the env time limit set by TimeLimit wrapper was once not respected
-                        # and all reproducibility effort did not conclude with an conclusive answer
-                        # TODO(lionel): find out why this is happening (Gymnasium bug?)
-
-                        # since end of the trajectory, add the trajectory to the i-th traject store
-                        assert agent.traject_stores is not None  # quiets down the type-checker
-                        agent.traject_stores[i].append(list(ongoing_trajs[i]))
                         # reset the ongoing_trajs to an empty one
                         ongoing_trajs[i] = deque([], maxlen=length)
 
