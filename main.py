@@ -190,7 +190,8 @@ class MagicRunner(object):
         if self._cfg.lstm_mode or self._cfg.enable_sr:
             em_mxlen = self._cfg.em_mxlen
             if em_mxlen > max_ep_steps:
-                logger.warn("episodic memory size too big: overriding it to max val")
+                logger.warn(
+                    f"episodic memory size too big: overriding it to max val: {max_ep_steps}")
                 em_mxlen = max_ep_steps
             traject_stores = [TrajectStore(
                 generator=torch.Generator(device).manual_seed(self._cfg.seed),
