@@ -3,9 +3,10 @@ cuda: false
 fp16: false
 
 # env
-vecenv: false
-numenv: 1
-horizon: 500
+vectorized: true
+multi_proc: false
+numenv: 4
+horizon: 256
 
 # logging
 wandb_project: "damnlemons"

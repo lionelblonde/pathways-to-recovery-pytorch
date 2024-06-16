@@ -8,6 +8,7 @@ from beartype import beartype
 import gymnasium as gym
 from gymnasium.core import Env
 from gymnasium.wrappers.time_limit import TimeLimit
+from gymnasium.vector.sync_vector_env import SyncVectorEnv
 from gymnasium.vector.async_vector_env import AsyncVectorEnv
 
 from helpers import logger
@@ -34,6 +35,7 @@ def make_env(
     horizon: int,
     *,
     vectorized: bool,
+    multi_proc: bool,
     num_env: Optional[int] = None,
     wrap_absorb: bool,
     record: bool,
@@ -58,6 +60,7 @@ def make_env(
             env_id,
             horizon,
             vectorized=vectorized,
+            multi_proc=multi_proc,
             num_env=num_env,
             wrap_absorb=wrap_absorb,
             record=record,
@@ -72,6 +75,7 @@ def make_farama_mujoco_env(
     horizon: int,
     *,
     vectorized: bool,
+    multi_proc: bool,
     num_env: Optional[int],
     wrap_absorb: bool,
     record: bool,
@@ -98,11 +102,11 @@ def make_farama_mujoco_env(
     elif vectorized:
         assert num_env is not None
         assert horizon is not None
-        env = AsyncVectorEnv([
+        env = (AsyncVectorEnv if multi_proc else SyncVectorEnv)([
             lambda: TimeLimit(gym.make(env_id), max_episode_steps=horizon)
             for _ in range(num_env)
         ])
-        assert isinstance(env, AsyncVectorEnv)
+        assert isinstance(env, (AsyncVectorEnv, SyncVectorEnv))
         logger.info("using vectorized envs")
     else:
         assert horizon is not None

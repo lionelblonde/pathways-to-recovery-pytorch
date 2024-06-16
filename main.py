@@ -107,7 +107,7 @@ class MagicRunner(object):
         self.name = get_name(self._cfg.uuid, self._cfg.env_id, self._cfg.seed)
 
         # slight overwrite for consistency, before setting to read-only
-        self._cfg.num_env = self._cfg.numenv if self._cfg.vecenv else 1
+        self._cfg.num_env = self._cfg.numenv if self._cfg.vectorized else 1
 
         # set the cfg to read-only for safety
         OmegaConf.set_readonly(self._cfg, value=True)
@@ -157,7 +157,8 @@ class MagicRunner(object):
         env, net_shapes, erb_shapes, max_ac, max_ep_steps = make_env(
             self._cfg.env_id,
             self._cfg.horizon,
-            vectorized=self._cfg.vecenv,
+            vectorized=self._cfg.vectorized,
+            multi_proc=self._cfg.multi_proc,
             num_env=self._cfg.num_env,
             wrap_absorb=self._cfg.wrap_absorb,
             record=False,
@@ -232,6 +233,7 @@ class MagicRunner(object):
             self._cfg.env_id,
             horizon=1000,
             vectorized=False,
+            multi_proc=False,
             wrap_absorb=self._cfg.wrap_absorb,
             record=self._cfg.record,
             render=self._cfg.render,
@@ -283,6 +285,7 @@ class MagicRunner(object):
             self._cfg.env_id,
             horizon=1000,
             vectorized=False,
+            multi_proc=False,
             wrap_absorb=self._cfg.wrap_absorb,
             record=self._cfg.record,
             render=self._cfg.render,

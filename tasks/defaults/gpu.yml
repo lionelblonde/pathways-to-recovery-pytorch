@@ -3,8 +3,9 @@ cuda: true
 fp16: false
 
 # env
-vecenv: true
-numenv: 8
+vectorized: true
+multi_proc: false
+numenv: 4
 horizon: 256
 
 # logging
