@@ -89,9 +89,11 @@ def make_farama_mujoco_env(
     # normally the windowed one is "human" .other option for later: "rgb_array", but prefer:
     # the following: `from gymnasium.wrappers.pixel_observation import PixelObservationWrapper`
     if record:  # overwrites render
-        env = gym.make(env_id, render_mode="rgb_array_list")
+        assert horizon is not None
+        env = TimeLimit(gym.make(env_id, render_mode="rgb_array_list"), max_episode_steps=horizon)
     elif render:
-        env = gym.make(env_id, render_mode="human")
+        assert horizon is not None
+        env = TimeLimit(gym.make(env_id, render_mode="human"), max_episode_steps=horizon)
         # reference: https://younis.dev/blog/render-api/
     elif vectorized:
         assert num_env is not None
@@ -103,7 +105,8 @@ def make_farama_mujoco_env(
         assert isinstance(env, AsyncVectorEnv)
         logger.info("using vectorized envs")
     else:
-        env = gym.make(env_id)
+        assert horizon is not None
+        env = TimeLimit(gym.make(env_id), max_episode_steps=horizon)
 
     # build shapes for nets and replay buffer
     net_shapes = {}
