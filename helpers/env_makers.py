@@ -8,7 +8,7 @@ from beartype import beartype
 import gymnasium as gym
 from gymnasium.core import Env
 from gymnasium.wrappers.time_limit import TimeLimit
-from gymnasium.experimental.vector.async_vector_env import AsyncVectorEnv
+from gymnasium.vector.async_vector_env import AsyncVectorEnv
 
 from helpers import logger
 import environments

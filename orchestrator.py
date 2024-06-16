@@ -17,7 +17,7 @@ import numpy as np
 
 import gymnasium as gym
 from gymnasium.core import Env
-from gymnasium.experimental.vector.vector_env import VectorEnv
+from gymnasium.vector.vector_env import VectorEnv
 
 from helpers import logger
 from helpers.opencv_util import record_video
