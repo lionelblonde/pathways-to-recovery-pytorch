@@ -4,9 +4,9 @@ fp16: false
 
 # env
 vectorized: true
-multi_proc: false
+multi_proc: true
 numenv: 4
-horizon: 256
+horizon: 1000
 
 # logging
 wandb_project: "damnlemons"
@@ -15,7 +15,7 @@ render: false
 
 # training
 num_timesteps: 10000000
-training_steps_per_iter: 2
+training_steps_per_iter: 1
 eval_steps_per_iter: 10
 eval_every: 100
 
@@ -25,7 +25,7 @@ layer_norm: true
 # optimization
 actor_lr: 2.5e-4
 critic_lr: 2.5e-4
-clip_norm: 0.
+clip_norm: 1.
 wd_scale: 0.
 
 # algorithm
@@ -82,8 +82,8 @@ wrap_absorb: true
 d_batch_norm: false
 
 # pathways to recovery
-enable_sr: true
-tsx_capacity: 500
+enable_sr: false
+tsx_capacity: 10000
 em_mxlen: 1000
 amortized_advantage: false
 lstm_mode: false
