@@ -196,12 +196,12 @@ class Discriminator(nn.Module):
             ("fc_block_1", nn.Sequential(OrderedDict([
                 ("fc", apply_sn(nn.Linear(in_dim, hid_dims[0]))),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
-                ("nl", nn.LeakyReLU(negative_slope=0.1)),
+                ("nl", nn.Mish()),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", apply_sn(nn.Linear(hid_dims[0], hid_dims[1]))),
                 ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
-                ("nl", nn.LeakyReLU(negative_slope=0.1)),
+                ("nl", nn.Mish()),
             ]))),
         ]))
         self.d_head = nn.Linear(hid_dims[1], 1)
