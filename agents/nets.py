@@ -159,15 +159,15 @@ class Discriminator(nn.Module):
                  hid_dims: tuple[int, int],
                  rms_obs: RunningMoments,
                  *,
-                 layer_norm: bool,
                  wrap_absorb: bool,
                  d_batch_norm: bool,
+                 d_layer_norm: bool,
                  spectral_norm: bool,
                  state_only: bool):
         super().__init__()
-        self.layer_norm = layer_norm
         self.wrap_absorb = wrap_absorb
         self.d_batch_norm = d_batch_norm
+        self.d_layer_norm = d_layer_norm
         self.spectral_norm = spectral_norm
         self.state_only = state_only
         if self.d_batch_norm:
@@ -195,12 +195,12 @@ class Discriminator(nn.Module):
         self.fc_stack = nn.Sequential(OrderedDict([
             ("fc_block_1", nn.Sequential(OrderedDict([
                 ("fc", apply_sn(nn.Linear(in_dim, hid_dims[0]))),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[0])),
+                ("ln", (nn.LayerNorm if self.d_layer_norm else nn.Identity)(hid_dims[0])),
                 ("nl", nn.Mish()),
             ]))),
             ("fc_block_2", nn.Sequential(OrderedDict([
                 ("fc", apply_sn(nn.Linear(hid_dims[0], hid_dims[1]))),
-                ("ln", (nn.LayerNorm if self.layer_norm else nn.Identity)(hid_dims[1])),
+                ("ln", (nn.LayerNorm if self.d_layer_norm else nn.Identity)(hid_dims[1])),
                 ("nl", nn.Mish()),
             ]))),
         ]))

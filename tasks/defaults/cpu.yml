@@ -80,6 +80,7 @@ one_sided_pen: true
 historical_patching: true
 wrap_absorb: true
 d_batch_norm: false
+d_layer_norm: true
 
 # pathways to recovery
 enable_sr: false
