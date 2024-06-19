@@ -187,6 +187,9 @@ class MagicRunner(object):
         for i, rb in enumerate(replay_buffers):
             logger.info(f"rb#{i} [{rb}] is set")
 
+        # perform quick sanity check on a ring buffer data structure
+        replay_buffers[0].ring_buffers["acs"].sanity_check_ringbuffer()
+
         traject_stores = None  # quiets down the type-checker
         if self._cfg.lstm_mode or self._cfg.enable_sr:
             em_mxlen = self._cfg.em_mxlen

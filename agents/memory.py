@@ -53,6 +53,30 @@ class RingBuffer(object):
     def latest_entry_idx(self) -> int:
         return (self.start + self.length - 1) % self.maxlen
 
+    @beartype
+    @classmethod
+    def sanity_check_ringbuffer(cls):
+        # create a RingBuffer object
+        ring_buffer = cls((maxlen := 5), (shape := (3, 2)), device=torch.device("cpu"))
+        # fill the replay buffer with maxlen+1 items
+        new_items = [
+            torch.rand(*shape),
+            (i1 := torch.rand(*shape)),
+            (i2 := torch.rand(*shape)),
+            (i3 := torch.rand(*shape)),
+            (i4 := torch.rand(*shape)),
+            (i5 := torch.rand(*shape)),
+        ]
+        assert len(new_items) == maxlen + 1  # for us
+        for i in range(maxlen + 1):
+            ring_buffer.append(v=new_items[i])
+        # check that the last item added is in first position
+        assert torch.equal(ring_buffer[0], i1)
+        assert torch.equal(ring_buffer[1], i2)
+        assert torch.equal(ring_buffer[2], i3)
+        assert torch.equal(ring_buffer[3], i4)
+        assert torch.equal(ring_buffer[4], i5)
+
 
 class TrajectStore(object):
 
