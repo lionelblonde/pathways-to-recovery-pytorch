@@ -718,6 +718,7 @@ class EveAgent(object):
             }, step_metric=self.sr_updates_so_far, glob="train_sr")
 
         gated_sum = gee * (torch.cumsum(cee, dim=1) - cee)
+        # same the same as the equation, but with compute trick to keep the op batch
 
         if separate:
             loss_1 = mask * (reward - bee)
