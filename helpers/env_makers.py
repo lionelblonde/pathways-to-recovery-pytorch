@@ -140,6 +140,7 @@ def make_farama_mujoco_env(
             "obs1": (ob_dim,),
             "acs": (ac_dim,),
             "rews": (1,),
+            "env_rews": (1,),
             "dones1": (1,),
             "obs0_orig": (ob_dim_orig,),
             "obs1_orig": (ob_dim_orig,),
@@ -151,6 +152,7 @@ def make_farama_mujoco_env(
             "obs1": (ob_dim,),
             "acs": (ac_dim,),
             "rews": (1,),
+            "env_rews": (1,),
             "dones1": (1,),
         })
 

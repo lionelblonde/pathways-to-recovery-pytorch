@@ -83,6 +83,7 @@ d_batch_norm: false
 d_layer_norm: true
 
 # pathways to recovery
+rl_mode: true
 enable_sr: false
 separate: true
 tsx_capacity: 10000

@@ -90,7 +90,7 @@ def segment(env: Union[Env, VectorEnv],
             yield
 
         # interact with env
-        new_ob, _, terminated, truncated, info = env.step(ac)  # reward ignored
+        new_ob, env_rew, terminated, truncated, info = env.step(ac)
 
         if num_env > 1:
             logger.debug(f"{terminated=} | {truncated=}")
@@ -109,7 +109,8 @@ def segment(env: Union[Env, VectorEnv],
         # read about what truncation means at the link below:
         # https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/#truncation
 
-        tr_or_vtr = [ob, ac, new_ob, terminated]
+        env_rew = rearrange(env_rew, "b -> b 1")
+        tr_or_vtr = [ob, ac, new_ob, terminated, env_rew]
         # note: we use terminated as a done replacement, but keep the key "dones1"
         # because it is the key used in the demo files
 
@@ -171,11 +172,11 @@ def postproc_vtr(num_envs: int,
     vouts = []
     for i in range(num_envs):
         tr = [e[i] for e in vtr]
-        ob, ac, _, terminated = tr
+        ob, ac, _, terminated, env_rew = tr
         if "final_observation" in info:
             if bool(info["_final_observation"][i]):
                 logger.debug("writing over new_ob with info[final_observation]")
-                tr = [ob, ac, info["final_observation"][i], terminated]
+                tr = [ob, ac, info["final_observation"][i], terminated, env_rew]
         outs = postproc_tr(tr, ob_shape, ac_shape, wrap_absorb=wrap_absorb)
         vouts.extend(outs)
     return vouts
@@ -188,7 +189,7 @@ def postproc_tr(tr: list[np.ndarray],
                 *,
                 wrap_absorb: bool) -> list[tuple[dict[str, np.ndarray], ...]]:
 
-    ob, ac, new_ob, terminated = tr
+    ob, ac, new_ob, terminated, env_rew = tr
 
     if wrap_absorb:
 
@@ -207,6 +208,7 @@ def postproc_tr(tr: list[np.ndarray],
                 "obs0_orig": ob,
                 "acs_orig": ac,
                 "obs1_orig": new_ob,
+                "env_rews": env_rew,
             }
             # add absorbing transition
             ob_zeros_1 = np.append(np.zeros(ob_shape[-1]), 1)
@@ -220,6 +222,7 @@ def postproc_tr(tr: list[np.ndarray],
                 "obs0_orig": ob,  # from previous transition, with reward eval on absorbing
                 "acs_orig": ac,  # from previous transition, with reward eval on absorbing
                 "obs1_orig": new_ob,  # from previous transition, with reward eval on absorbing
+                "env_rews": env_rew,  # from previous transition, with reward eval on absorbing
             }
             return [(transition, transition_a)]
 
@@ -232,6 +235,7 @@ def postproc_tr(tr: list[np.ndarray],
             "obs0_orig": ob,
             "acs_orig": ac,
             "obs1_orig": new_ob,
+            "env_rews": env_rew,
         }
         return [(transition,)]
 
@@ -240,6 +244,7 @@ def postproc_tr(tr: list[np.ndarray],
         "acs": ac,
         "obs1": new_ob,
         "dones1": terminated,
+        "env_rews": env_rew,
     }
     return [(transition,)]
 

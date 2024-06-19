@@ -558,7 +558,9 @@ class EveAgent(object):
                     "b t d -> (b t) d")
 
             action = trxs_batch[f"acs{sfx}"]
-            reward = trxs_batch["rews"]
+
+            reward = trxs_batch["env_rews"] if self.hps.rl_mode else trxs_batch["rews"]
+
             done = trxs_batch["dones1"].float()
             td_len = trxs_batch["td_len"] if self.hps.n_step_returns else torch.ones_like(done)
 
@@ -583,7 +585,7 @@ class EveAgent(object):
                 td_len = rearrange(td_len,
                     "b t d -> (b t) d")
 
-            # compute c(s,a) while still in the no-grad context manager: no need to detach by hand
+            # still in no-grad context
             cee = None
             if self.hps.enable_sr and use_sr:
                 # compute c(s,a)
