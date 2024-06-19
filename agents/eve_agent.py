@@ -161,7 +161,8 @@ class EveAgent(object):
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
         if not self.hps.rl_mode:
-            disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
+            disc_net_args = [
+                self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
             logger.debug(f"discriminator net is using: {disc_hid_dims=}")
             disc_net_kwargs_keys = [
                 "wrap_absorb", "d_batch_norm", "d_layer_norm", "spectral_norm", "state_only"]
@@ -201,7 +202,7 @@ class EveAgent(object):
         if self.hps.enable_sr:
             base_net_args = [
                 (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
-                self.ac_shape, (base_hid_dims := (512, 512)), self.rms_obs]
+                self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
             assert isinstance(xx_shape, tuple), "the shape must be a tuple"
             logger.info(f"base nets are using: {base_hid_dims=}")
             base_net_kwargs = {"layer_norm": True, "spectral_norm": True}
