@@ -84,6 +84,7 @@ d_layer_norm: true
 
 # pathways to recovery
 enable_sr: false
+separate: true
 tsx_capacity: 10000
 em_mxlen: 1000
 amortized_advantage: false

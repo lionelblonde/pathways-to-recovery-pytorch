@@ -198,7 +198,7 @@ class EveAgent(object):
         if self.hps.enable_sr:
             base_net_args = [
                 (xx_shape := (self.LSTM_DIM,) if self.hps.lstm_mode else self.ob_shape),
-                self.ac_shape, (base_hid_dims := (100, 100)), self.rms_obs]
+                self.ac_shape, (base_hid_dims := (512, 512)), self.rms_obs]
             assert isinstance(xx_shape, tuple), "the shape must be a tuple"
             logger.info(f"base nets are using: {base_hid_dims=}")
             base_net_kwargs = {"layer_norm": True, "spectral_norm": True}
@@ -697,7 +697,9 @@ class EveAgent(object):
                                      state: torch.Tensor,
                                      action: torch.Tensor,
                                      reward: torch.Tensor,
-                                     mask: torch.Tensor) -> torch.Tensor:
+                                     mask: torch.Tensor,
+                                     *,
+                                     separate: bool) -> torch.Tensor:
         """Compute sr loss batchwise in 3D"""
         _, seq_t_max, _ = state.size()
         state = rearrange(state,
@@ -714,7 +716,19 @@ class EveAgent(object):
                 "gate-mean": (gee.sum() / mask.sum()).numpy(force=True),
                 "mask-fill-perc": (100. * mask.sum() / mask.numel()).numpy(force=True),
             }, step_metric=self.sr_updates_so_far, glob="train_sr")
+
         gated_sum = gee * (torch.cumsum(cee, dim=1) - cee)
+
+        if separate:
+            loss_1 = mask * (reward - bee)
+            loss_2 = mask * (reward - bee.detach() - gated_sum)
+            loss_1 = 0.5 * loss_1.pow(2)
+            loss_2 = 0.5 * loss_2.pow(2)
+            loss_1 = loss_1.sum() / mask.sum()
+            loss_2 = loss_2.sum() / mask.sum()
+            return loss_1 + loss_2
+
+        # if opting for the one-piece version of the loss
         loss = mask * (reward - gated_sum - bee)
         loss = 0.5 * loss.pow(2)
         return loss.sum() / mask.sum()
@@ -752,7 +766,7 @@ class EveAgent(object):
 
             # compute the sr loss using full-batch ops
             sr_loss = self.compute_sr_loss_batch3dseq0d(
-                state.clone().detach(), action, reward, mask)
+                state.clone().detach(), action, reward, mask, separate=self.hps.separate)
 
             self.cee_opt.zero_grad()
             self.bee_opt.zero_grad()
