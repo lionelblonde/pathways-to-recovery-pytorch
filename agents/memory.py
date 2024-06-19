@@ -346,7 +346,10 @@ class ReplayBuffer(object):
     @beartype
     def append(self, trn: dict[str, np.ndarray],
                *,
-               rew_func: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
+               rew_func: Optional[Callable[[torch.Tensor,
+                                            Optional[torch.Tensor],
+                                            Optional[torch.Tensor]],
+                                           torch.Tensor]],
         ) -> dict[str, torch.Tensor]:
         """Add a transition to the replay buffer.
         Returns the latest transition (i.e. the one just added) for subsequent modules to use
@@ -362,17 +365,18 @@ class ReplayBuffer(object):
             self.ring_buffers[k].append(v=new_tensor)
         # also add the synthetic reward to the replay buffer
         # note: by this point everything is already as a tensor on device
-        rew = rew_func(
-            *(rearrange(x, "d -> 1 d") for x in [
-                self.ring_buffers["obs0"][self.latest_entry_idx],
-                self.ring_buffers["acs"][self.latest_entry_idx],
-                self.ring_buffers["obs1"][self.latest_entry_idx],
-            ]),
-        )
-        self.ring_buffers["rews"].append(v=rew)
-        # sanity-check that all the ring buffers are at the same stage
-        last_idxs = [li := v.latest_entry_idx for v in self.ring_buffers.values()]
-        assert all(ll == li for ll in last_idxs), "not all equal"
+        if rew_func is not None:
+            rew = rew_func(
+                *(rearrange(x, "d -> 1 d") for x in [
+                    self.ring_buffers["obs0"][self.latest_entry_idx],
+                    self.ring_buffers["acs"][self.latest_entry_idx],
+                    self.ring_buffers["obs1"][self.latest_entry_idx],
+                ]),
+            )
+            self.ring_buffers["rews"].append(v=rew)
+            # sanity-check that all the ring buffers are at the same stage
+            last_idxs = [li := v.latest_entry_idx for v in self.ring_buffers.values()]
+            assert all(ll == li for ll in last_idxs), "not all equal"
         return self.latest_entry  # returned for subsequent modules to use
 
     @beartype

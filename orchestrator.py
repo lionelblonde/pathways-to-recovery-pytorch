@@ -124,7 +124,8 @@ def segment(env: Union[Env, VectorEnv],
         for i, outs in enumerate(outss):  # iterate over env (although maybe only one non-vec)
             for j, out in enumerate(outs):  # iterate over transitions
                 # add transition to the i-th replay buffer
-                pp_out = agent.replay_buffers[i].append(out, rew_func=agent.get_syn_rew)
+                rew_func = None if agent.hps.rl_mode else agent.get_syn_rew
+                pp_out = agent.replay_buffers[i].append(out, rew_func=rew_func)
 
                 if lstm_mode or enable_sr:
                     # add transition to the currently ongoing trajectory in the i-th env
@@ -460,8 +461,11 @@ def learn(cfg: DictConfig,
         tts = timer()
         ttl = []
         gtl = []
-        dtl = []
-        gs, ds = 0, 0
+        if not cfg.rl_mode:
+            dtl = []
+        gs = 0
+        if not cfg.rl_mode:
+            ds = 0
         for _ in range(tot := cfg.training_steps_per_iter):
 
             gts = timer()
@@ -495,16 +499,17 @@ def learn(cfg: DictConfig,
                 gtl.append(timer() - gts)
                 gts = timer()
 
-            dts = timer()
-            for _ in range(ds := cfg.d_steps):
-                # sample a batch of transitions from the replay buffer
-                trns_batch = agent.sample_trns_batch()
-                with ctx("discriminator training"):
-                    # update the discriminator
-                    agent.update_disc(trns_batch)
-
-                dtl.append(timer() - dts)
+            if not cfg.rl_mode:
                 dts = timer()
+                for _ in range(ds := cfg.d_steps):
+                    # sample a batch of transitions from the replay buffer
+                    trns_batch = agent.sample_trns_batch()
+                    with ctx("discriminator training"):
+                        # update the discriminator
+                        agent.update_disc(trns_batch)
+
+                    dtl.append(timer() - dts)
+                    dts = timer()
 
             ttl.append(timer() - tts)
             tts = timer()
@@ -515,9 +520,10 @@ def learn(cfg: DictConfig,
         logger.info(colored(
             f"avg gt over {tot}steps X {gs} g-steps: {np.mean(gtl)}secs",
             "green"))
-        logger.info(colored(
-            f"avg dt over {tot}steps X {ds} d-steps: {np.mean(dtl)}secs",
-            "green"))
+        if not cfg.rl_mode:
+            logger.info(colored(
+                f"avg dt over {tot}steps X {ds} d-steps: {np.mean(dtl)}secs",
+                "green"))
         logger.info(colored(
             f"tot tt over {tot}steps: {np.sum(ttl)}secs",
             "magenta", attrs=["reverse"]))

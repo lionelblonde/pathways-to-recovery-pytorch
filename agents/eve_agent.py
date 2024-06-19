@@ -66,8 +66,9 @@ class EveAgent(object):
             logger.info("clip_norm <= 0, hence disabled")
         assert 0. <= float(self.hps.d_label_smooth) <= 1.
 
-        # demo dataset
-        self.expert_dataset = expert_dataset
+        if not self.hps.rl_mode:
+            # demo dataset
+            self.expert_dataset = expert_dataset
 
         # replay buffer
         self.replay_buffers = replay_buffers
@@ -159,12 +160,13 @@ class EveAgent(object):
             self.targ_twin = Critic(*crit_net_args, **crit_net_kwargs).to(self.device)
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
-        disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
-        logger.debug(f"discriminator net is using: {disc_hid_dims=}")
-        disc_net_kwargs_keys = [
-            "wrap_absorb", "d_batch_norm", "d_layer_norm", "spectral_norm", "state_only"]
-        disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
-        self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
+        if not self.hps.rl_mode:
+            disc_net_args = [self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
+            logger.debug(f"discriminator net is using: {disc_hid_dims=}")
+            disc_net_kwargs_keys = [
+                "wrap_absorb", "d_batch_norm", "d_layer_norm", "spectral_norm", "state_only"]
+            disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
+            self.disc = Discriminator(*disc_net_args, **disc_net_kwargs).to(self.device)
 
         # set up the optimizers
 
@@ -175,7 +177,8 @@ class EveAgent(object):
             self.twin_opt = Adam(self.twin.parameters(), lr=self.hps.critic_lr,
                 weight_decay=self.hps.wd_scale)
 
-        self.disc_opt = Adam(self.disc.parameters(), lr=self.hps.d_lr)
+        if not self.hps.rl_mode:
+            self.disc_opt = Adam(self.disc.parameters(), lr=self.hps.d_lr)
 
         # setup log(alpha) if SAC is chosen
         self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
@@ -216,7 +219,8 @@ class EveAgent(object):
         log_module_info(self.crit)
         if self.hps.clipped_double:
             log_module_info(self.twin)
-        log_module_info(self.disc)
+        if not self.hps.rl_mode:
+            log_module_info(self.disc)
         if self.hps.enable_sr:
             log_module_info(self.cee)
             log_module_info(self.bee)
@@ -249,7 +253,9 @@ class EveAgent(object):
         for rb in self.replay_buffers:
             batch = rb.sample(
                 self.hps.batch_size,
-                patcher=self.get_syn_rew if self.hps.historical_patching else None,
+                patcher=(
+                    None if (not self.hps.historical_patching or self.hps.rl_mode)
+                    else self.get_syn_rew),
                 n_step_returns=self.hps.n_step_returns,
                 lookahead=self.hps.lookahead,
                 gamma=self.hps.gamma,
@@ -270,7 +276,9 @@ class EveAgent(object):
         for ts in self.traject_stores:
             batch = ts.sample(
                 self.hps.batch_size,
-                patcher=self.get_syn_rew if self.hps.historical_patching else None,
+                patcher=(
+                    None if (not self.hps.historical_patching or self.hps.rl_mode)
+                    else self.get_syn_rew),
             )
             if batch is None:
                 logger.warn("sample method returned None, indicating that store is still empty")
@@ -1024,12 +1032,15 @@ class EveAgent(object):
             "rms_obs": self.rms_obs.state_dict(),
             "actr": self.actr.state_dict(),
             "crit": self.crit.state_dict(),
-            "disc": self.disc.state_dict(),
             "actr_opt": self.actr_opt.state_dict(),
             "crit_opt": self.crit_opt.state_dict(),
-            "disc_opt": self.disc_opt.state_dict(),
             "actr_sched": self.actr_sched.state_dict(),
         }
+        if not self.hps.rl_mode:
+            checkpoint.update({
+                "disc": self.disc.state_dict(),
+                "disc_opt": self.disc_opt.state_dict(),
+            })
         if self.hps.clipped_double:
             checkpoint.update({
                 "twin": self.twin.state_dict(),
@@ -1057,10 +1068,12 @@ class EveAgent(object):
         self.rms_obs.load_state_dict(checkpoint["rms_obs"])
         self.actr.load_state_dict(checkpoint["actr"])
         self.crit.load_state_dict(checkpoint["crit"])
-        self.disc.load_state_dict(checkpoint["disc"])
+        if not self.hps.rl_mode:
+            self.disc.load_state_dict(checkpoint["disc"])
         self.actr_opt.load_state_dict(checkpoint["actr_opt"])
         self.crit_opt.load_state_dict(checkpoint["crit_opt"])
-        self.disc_opt.load_state_dict(checkpoint["disc_opt"])
+        if not self.hps.rl_mode:
+            self.disc_opt.load_state_dict(checkpoint["disc_opt"])
         self.actr_sched.load_state_dict(checkpoint["actr_sched"])
         if self.hps.clipped_double:
             if "twin" in checkpoint:
