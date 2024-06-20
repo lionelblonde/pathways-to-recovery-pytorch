@@ -15,7 +15,7 @@ Download the expert demonstrations at
 (this link (Google Drive))
 [https://drive.google.com/drive/folders/1dGw-O6ZT_WWTuqDayIA9xat1jZgeiXoE?usp=drive_link].
 
-## Future Work
+## Future extensions
 
 Extension to environments with keypoints/keyframes like the ALE suite (Atari), or the cool
 "Box-World" environment introduced in [this paper](https://arxiv.org/abs/1806.01830)
@@ -24,3 +24,17 @@ I have previously played with the latter ("Box-World") recovering its creation c
 DeepMind's [`pyColab`](https://github.com/google-deepmind/pycolab) repo. The wrapped code is
 available here:
 `https://github.com/lionelblonde/ppo-gail-pytorch/blob/master/helpers/pycolab_envs.py`.
+
+As in the original paper, it is very likely that synthetic returns can only be beneficial in
+situations where the agent is provided with extremely sparse reward signal. Allowing for such
+densification of reward in scenarios where the reward already is treated toward that density goal
+is likely to introduce a survival bias in the agent's behavior (i.e. staying alive has become
+enough for the agent who is not seeing solving the imitation task as necessary in comparison).
+While this problem can be solved by reward shaping (adjusting the reward components' coefficients
+by hand), such engineering endeavour arguably defeats the purpose of learning-based imitation.
+Environments where agents are to imitate an expert whose behavior is very rare and hard to discover
+by chance/by mistake by exploring the MDP are likely to produce sparser imitation rewards.
+Similarly, environments involving keypoints like picking up a key for a locked door to unlock later
+in the episode, or finding the color associated with the color previously stepped on ("Box-World")
+are examples of scenarios that could give an edge to add-ons like synthetic returns in imitation
+learning.
