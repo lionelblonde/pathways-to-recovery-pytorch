@@ -1,4 +1,4 @@
-# Pathways to Recovery (P2R)
+# Pathways to Recovery (P2R) (wip)
 
 The goal of this repository is the investigate the extent to which off-policy AIL methods are
 suffering from __credit misassignment__, and to propose a solution consisting to providing a way to
@@ -15,7 +15,7 @@ Download the expert demonstrations at
 (this link (Google Drive))
 [https://drive.google.com/drive/folders/1dGw-O6ZT_WWTuqDayIA9xat1jZgeiXoE?usp=drive_link].
 
-## Future extensions
+## Future ideas of extension
 
 Extension to environments with keypoints/keyframes like the ALE suite (Atari), or the cool
 "Box-World" environment introduced in [this paper](https://arxiv.org/abs/1806.01830)
