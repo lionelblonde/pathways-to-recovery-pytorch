@@ -1,4 +1,4 @@
-# Pathways to Recovery (P2R) (wip)
+# Pathways to Recovery (P2R) (wip/retired for now)
 
 The goal of this repository is the investigate the extent to which off-policy AIL methods are
 suffering from __credit misassignment__, and to propose a solution consisting to providing a way to
