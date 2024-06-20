@@ -22,8 +22,9 @@ Extension to environments with keypoints/keyframes like the ALE suite (Atari), o
 (DeepMind's _Relational Deep Reinforcement Learning_).
 I have previously played with the latter ("Box-World") recovering its creation code from
 DeepMind's [`pyColab`](https://github.com/google-deepmind/pycolab) repo. The wrapped code is
-available here:
-`https://github.com/lionelblonde/ppo-gail-pytorch/blob/master/helpers/pycolab_envs.py`.
+available here: [
+`https://github.com/lionelblonde/ppo-gail-pytorch/blob/master/helpers/pycolab_envs.py`](
+https://github.com/lionelblonde/ppo-gail-pytorch/blob/master/helpers/pycolab_envs.py).
 
 As in the original paper, it is very likely that synthetic returns can only be beneficial in
 situations where the agent is provided with extremely sparse reward signal. Allowing for such
