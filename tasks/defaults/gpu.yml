@@ -83,12 +83,12 @@ d_batch_norm: false
 d_layer_norm: true
 
 # pathways to recovery
-rl_mode: false
-enable_sr: false
+rl_mode: true
+enable_sr: true
 separate: true
 tsx_capacity: 10000
 em_mxlen: 1000
-amortized_advantage: false
+amortized_advantage: true
 lstm_mode: false
-sr_alpha: 0.2
+sr_alpha: 0.05
 sr_beta: 1.
