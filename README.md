@@ -6,6 +6,9 @@ learn a _recovery behavior_ explicitly, helping the policy to get back on the ex
 This auxiliairy support behavior is distilled in the agent via the augmentation of the imitation
 reward with _synthetic returns_ (official impl. from DeepMind in Jax available at [this link](
 https://github.com/google-deepmind/deepmind-research/tree/master/synthetic_returns)).
+Still, despite being introduced here with imitation learning in mind, the hyper-parameter `rl_mode`
+turns off all the IL-specific components and makes the agent use the environment's reward to
+learn its policy and value.
 
 The agents are set to run in the [Gymnasium](
 https://gymnasium.farama.org/index.html) suite of environments.
