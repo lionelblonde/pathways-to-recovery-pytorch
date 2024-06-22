@@ -18,7 +18,7 @@ from helpers import logger
 from helpers.env_makers import make_env
 from helpers.dataset import DemoDataset
 from agents.memory import ReplayBuffer, TrajectStore
-from agents.eve_agent import EveAgent
+from agents.agent import Agent
 
 
 @beartype
@@ -210,8 +210,8 @@ class MagicRunner(object):
                 logger.info(f"ts#{i} [{ts}] is set")
 
         @beartype
-        def agent_wrapper() -> EveAgent:
-            return EveAgent(
+        def agent_wrapper() -> Agent:
+            return Agent(
                 net_shapes=net_shapes,
                 max_ac=max_ac,
                 device=device,
@@ -296,8 +296,8 @@ class MagicRunner(object):
         assert isinstance(env, Env), "no vecenv allowed here"
 
         @beartype
-        def agent_wrapper() -> EveAgent:
-            return EveAgent(
+        def agent_wrapper() -> Agent:
+            return Agent(
                 net_shapes=net_shapes,
                 max_ac=max_ac,
                 device=device,
