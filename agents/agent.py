@@ -369,12 +369,12 @@ class Agent(object):
             # compute qz estimate
             z = self.crit(state, action)  # shape: [batch_size, c51_num_atoms]
             z = rearrange(z, "b n -> b n 1")  # equivalent to unsqueeze(-1)
-            z.clamp(0.01, 0.99)
+            z = z.clamp(0.01, 0.99)  # avoiding in-place op
 
             # compute target qz estimate
             z_prime = self.targ_crit(next_state, next_action)
             # `z_prime` is shape [batch_size, c51_num_atoms]
-            z_prime.clamp(0.01, 0.99)
+            z_prime = z_prime.clamp(0.01, 0.99)  # avoiding in-place op
 
             reward = repeat(reward, "b 1 -> b n", n=self.hps.c51_num_atoms)
             gamma_mask = ((self.hps.gamma ** td_len) * (1 - done))
