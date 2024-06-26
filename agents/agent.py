@@ -121,6 +121,7 @@ class Agent(object):
 
         actr_hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
         crit_hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
+        disc_hid_dims = (400, 300) if self.hps.prefer_td3_over_sac else (256, 256)
 
         actr_net_args = [self.ob_shape, self.ac_shape, actr_hid_dims, self.rms_obs, self.max_ac]
         actr_net_kwargs = {"layer_norm": self.hps.layer_norm}
@@ -161,9 +162,7 @@ class Agent(object):
             self.targ_twin.load_state_dict(self.twin.state_dict())
 
         if not self.hps.rl_mode:
-            disc_net_args = [
-                self.ob_shape, self.ac_shape, (disc_hid_dims := (100, 100)), self.rms_obs]
-            logger.debug(f"discriminator net is using: {disc_hid_dims=}")
+            disc_net_args = [self.ob_shape, self.ac_shape, disc_hid_dims, self.rms_obs]
             disc_net_kwargs_keys = [
                 "wrap_absorb", "d_batch_norm", "d_layer_norm", "spectral_norm", "state_only"]
             disc_net_kwargs = {k: getattr(self.hps, k) for k in disc_net_kwargs_keys}
