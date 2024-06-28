@@ -183,7 +183,7 @@ class Agent(object):
         # setup log(alpha) if SAC is chosen
         self.log_alpha = torch.tensor(self.hps.alpha_init).log().to(self.device)
         # the previous line is here for the alpha property to always exist
-        if not self.hps.prefer_td3_over_sac:
+        if (not self.hps.prefer_td3_over_sac) and self.hps.learnable_alpha:
             # create learnable Lagrangian multiplier
             # common trick: learn log(alpha) instead of alpha directly
             self.log_alpha.requires_grad = True
